@@ -895,85 +895,202 @@ h1, h2, h3, .chat-title, .user-name {
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* --- Mobile Responsiveness --- */
-@media (max-width: 768px) {
+/* --- Mobile Responsiveness (JS-controlled panel switching, no CSS hacks) --- */
+@media (max-width: 900px) {
+  /* Full screen */
   #root {
     width: 100%;
-    height: 100%;
+    height: 100dvh;
     margin: 0;
     border-radius: 0;
+    max-width: 100%;
+    overflow: hidden;
   }
 
+  body {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  /* Container */
+  .app-container {
+    width: 100%;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  /* Sidebar fills full screen on mobile */
+  .sidebar {
+    width: 100% !important;
+    height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Sidebar header — always fully visible */
+  .sidebar-header {
+    flex-shrink: 0;
+    height: auto;
+    min-height: 64px;
+    padding: 10px 16px;
+  }
+
+  /* User list scrollable */
+  .users-list {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Bigger touch targets in user list */
+  .user-item {
+    padding: 14px 16px;
+    min-height: 60px;
+  }
+
+  .user-item:hover {
+    padding-left: 16px;
+  }
+
+  .user-name {
+    font-size: 15px;
+  }
+
+  /* Chat area fills full screen */
+  .chat-area {
+    width: 100% !important;
+    height: 100dvh;
+    flex-direction: column;
+    flex: none !important;
+  }
+
+  /* Chat header with back button */
+  .chat-header {
+    height: 60px;
+    padding: 0 10px;
+    flex-shrink: 0;
+  }
+
+  /* Chat messages */
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 10px 8px;
+  }
+
+  /* Message bubbles */
+  .message-bubble {
+    max-width: 80vw !important;
+    font-size: 15px;
+  }
+
+  /* Input bar */
+  .chat-input-container {
+    padding: 8px 8px;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  /* Text input — font 16px prevents iOS auto-zoom */
+  .chat-input {
+    font-size: 16px !important;
+    padding: 10px 14px !important;
+    border-radius: 24px !important;
+    min-height: 44px;
+  }
+
+  /* Send/mic button */
+  .send-button {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+    border-radius: 50% !important;
+    flex-shrink: 0;
+  }
+
+  /* Login screen */
   .login-container {
-    padding: 0 16px;
-    align-items: flex-start;
-    padding-top: 5vh;
+    padding: 16px;
+    align-items: center;
+    padding-top: 3vh;
   }
 
   .split-login-card {
     flex-direction: column;
     height: auto;
-    min-height: 85vh;
+    width: 100%;
+    max-width: 100%;
     border-radius: 20px;
     overflow-y: auto;
+    max-height: 97dvh;
   }
 
+  /* Hide decorative left panel on mobile — save space */
   .split-left {
-    padding: 30px 20px;
+    display: none;
   }
 
   .split-right {
-    padding: 30px 20px;
-  }
-
-  .hero-title {
-    font-size: 32px;
-  }
-
-  /* App Container logic */
-  .app-container {
+    padding: 32px 24px;
+    flex: none;
     width: 100%;
-    height: 100%;
-    display: flex;
-    overflow: hidden;
   }
 
-  /* When no chat is selected (sidebar is active) */
-  .app-container:not(.mobile-chat-active) .sidebar {
-    width: 100%;
-    display: flex;
-  }
-  .app-container:not(.mobile-chat-active) .chat-area,
-  .app-container:not(.mobile-chat-active) .admin-dashboard-container {
-    display: none !important;
+  /* Modal content */
+  .modal-content {
+    width: 90%;
+    max-width: 360px;
   }
 
-  /* When a chat is selected (chat area is active) */
-  .app-container.mobile-chat-active .sidebar {
-    display: none !important;
+  /* Unread badge */
+  .unread-badge {
+    min-width: 20px;
+    height: 20px;
+    font-size: 11px;
   }
-  .app-container.mobile-chat-active .chat-area,
-  .app-container.mobile-chat-active .admin-dashboard-container {
-    width: 100%;
-    display: flex;
-  }
+}
 
+/* Show back button on mobile, hide on desktop */
+.mobile-back-btn {
+  display: none;
+}
+
+@media (max-width: 900px) {
   .mobile-back-btn {
-    display: flex;
+    display: flex !important;
     align-items: center;
     justify-content: center;
-    margin-right: 12px;
+    margin-right: 6px;
     background: transparent;
     border: none;
     color: var(--text-primary);
     cursor: pointer;
-    padding: 4px;
+    padding: 8px;
+    border-radius: 50%;
+    min-width: 42px;
+    min-height: 42px;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-back-btn:active {
+    background: rgba(128,128,128,0.2);
   }
 }
 
-/* Hide back button on desktop */
-@media (min-width: 769px) {
-  .mobile-back-btn {
-    display: none !important;
+/* Hide action-pill text labels on small screens to save horizontal space */
+@media (max-width: 480px) {
+  .action-pill-btn span {
+    display: none;
+  }
+  .action-pill-btn {
+    padding: 8px !important;
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 50% !important;
+    justify-content: center;
   }
 }

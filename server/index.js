@@ -6,8 +6,28 @@ const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const path = require('path');
+const helmet = require('helmet');
 
 const app = express();
+
+// Secure Express headers (Fix for Nuclei vulnerability scan)
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "blob:", "https://*"],
+      connectSrc: ["'self'", "ws:", "wss:", "http:", "https:"],
+      mediaSrc: ["'self'", "blob:", "data:"],
+      workerSrc: ["'self'", "blob:"]
+    }
+  },
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginEmbedderPolicy: false
+}));
+
 app.use(cors());
 app.use(express.json({ limit: '10mb' })); // To parse JSON bodies
 
@@ -94,28 +114,70 @@ const db = new sqlite3.Database(dbPath, (err) => {
   }
 });
 
+const ADMIN_PIN = process.env.ADMIN_PIN || '889900';
+
+// Anti-Spam Registration Rate Limiter (Max 3 accounts per IP per 15 minutes)
+const registrationIpMap = new Map();
+const REGISTRATION_LIMIT = 3;
+const REGISTRATION_WINDOW_MS = 15 * 60 * 1000;
+
 // Auth Routes
 app.post('/register', async (req, res) => {
   const { username, password, publicKey } = req.body;
   if (!username || !password || !publicKey) {
-    return res.status(400).json({ error: 'All fields are required' });
+    return res.status(400).json({ error: 'Semua kolom wajib diisi' });
+  }
+
+  const cleanUser = username.trim();
+
+  // Validate username & password formatting
+  if (cleanUser.length < 3 || cleanUser.length > 20) {
+    return res.status(400).json({ error: 'Username harus 3 - 20 karakter.' });
+  }
+  if (!/^[a-zA-Z0-9_]+$/.test(cleanUser)) {
+    return res.status(400).json({ error: 'Username hanya boleh berisi huruf, angka, dan underscore (_).' });
+  }
+  const reservedNames = ['anonim', 'global', 'admin', 'system', 'root'];
+  if (reservedNames.includes(cleanUser.toLowerCase())) {
+    return res.status(400).json({ error: 'Username ini dilindungi sistem dan tidak dapat didaftarkan.' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password minimal harus 6 karakter.' });
+  }
+
+  // Rate Limiting per IP
+  const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+  const now = Date.now();
+  const ipRecord = registrationIpMap.get(clientIp) || { count: 0, windowStart: now };
+  
+  if (now - ipRecord.windowStart > REGISTRATION_WINDOW_MS) {
+    ipRecord.count = 0;
+    ipRecord.windowStart = now;
+  }
+
+  if (ipRecord.count >= REGISTRATION_LIMIT) {
+    return res.status(429).json({ error: 'Terlalu banyak pendaftaran akun dari IP ini. Silakan coba lagi dalam 15 menit.' });
   }
 
   try {
     const passwordHash = await bcrypt.hash(password, 10);
     
     db.run('INSERT INTO users (username, passwordHash, publicKey) VALUES (?, ?, ?)', 
-      [username, passwordHash, publicKey], 
+      [cleanUser, passwordHash, publicKey], 
       function(err) {
         if (err) {
           if (err.message.includes('UNIQUE constraint failed')) {
-            return res.status(400).json({ error: 'Username already exists' });
+            return res.status(400).json({ error: 'Username sudah digunakan orang lain' });
           }
           return res.status(500).json({ error: 'Database error' });
         }
         
-        const token = jwt.sign({ userId: this.lastID, username }, JWT_SECRET);
-        res.json({ token, username, userId: this.lastID });
+        // Increment IP registration counter
+        ipRecord.count++;
+        registrationIpMap.set(clientIp, ipRecord);
+
+        const token = jwt.sign({ userId: this.lastID, username: cleanUser }, JWT_SECRET);
+        res.json({ token, username: cleanUser, userId: this.lastID });
     });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
@@ -160,40 +222,34 @@ app.post('/login', (req, res) => {
   });
 });
 
-// Avatar Upload Endpoint
-app.post('/api/update-avatar', (req, res) => {
-  const { username, avatar } = req.body;
-  if (!username || !avatar) return res.status(400).json({ error: 'Username and avatar required' });
-  
-  // Update the user's avatar in the database
-  db.run('UPDATE users SET avatar = ? WHERE username = ?', [avatar, username], function(err) {
-    if (err) return res.status(500).json({ error: 'Database error' });
-    
-    // Broadcast the updated user list to all connected clients
-    if (typeof broadcastUserList === 'function') {
-      broadcastUserList();
-    }
-    
-    res.json({ success: true });
-  });
-});
-
-// Admin Middleware
+// Admin Middleware (Requires JWT Token + Secret Admin PIN Header)
 const authenticateAdmin = (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  const adminPin = req.headers['x-admin-pin'] || req.body?.adminPin;
+  
+  if (!token) return res.status(401).json({ error: 'Unauthorized. Token required.' });
   
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     if (decoded.username !== 'anonim') {
-      return res.status(403).json({ error: 'Forbidden. Admin access required.' });
+      return res.status(403).json({ error: 'Akses Ditolak. Khusus Akun Admin.' });
     }
+
+    if (!adminPin || adminPin !== ADMIN_PIN) {
+      return res.status(403).json({ error: 'PIN Keamanan Admin tidak valid atau belum dimasukkan.' });
+    }
+
     req.user = decoded;
     next();
   } catch (error) {
-    res.status(401).json({ error: 'Invalid token' });
+    res.status(401).json({ error: 'Token tidak valid' });
   }
 };
+
+// Verify Admin PIN endpoint
+app.post('/api/admin/verify-pin', authenticateAdmin, (req, res) => {
+  res.json({ success: true, message: 'PIN Keamanan Admin terverifikasi.' });
+});
 
 // Admin Endpoints
 app.get('/api/admin/users', authenticateAdmin, (req, res) => {
@@ -201,6 +257,45 @@ app.get('/api/admin/users', authenticateAdmin, (req, res) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     res.json(rows);
   });
+});
+
+// Get Active Online Sessions (Remote Session Management)
+app.get('/api/admin/sessions', authenticateAdmin, (req, res) => {
+  const sessionList = [];
+  for (const [username, user] of activeUsers.entries()) {
+    sessionList.push({
+      username: user.username,
+      socketId: user.socketId,
+      status: user.status,
+      ip: user.ip || '127.0.0.1',
+      userAgent: user.userAgent || 'Unknown Device',
+      connectedAt: user.connectedAt || new Date().toISOString()
+    });
+  }
+  res.json(sessionList);
+});
+
+// Kick / Remote Logout Session
+app.post('/api/admin/kick-session', authenticateAdmin, (req, res) => {
+  const { targetUsername, socketId } = req.body;
+  let targetSocketId = socketId;
+  
+  if (!targetSocketId && targetUsername) {
+    const user = activeUsers.get(targetUsername);
+    if (user) targetSocketId = user.socketId;
+  }
+  
+  if (targetSocketId) {
+    io.to(targetSocketId).emit('force_disconnect', { message: 'Sesi Anda telah di-logout oleh Admin secara remote.' });
+    const socket = io.sockets.sockets.get(targetSocketId);
+    if (socket) socket.disconnect(true);
+    
+    if (targetUsername) activeUsers.delete(targetUsername);
+    if (typeof broadcastUserList === 'function') broadcastUserList();
+    return res.json({ success: true, message: `Sesi ${targetUsername || targetSocketId} berhasil di-kick.` });
+  }
+  
+  res.status(404).json({ error: 'Sesi tidak ditemukan atau pengguna sudah offline.' });
 });
 
 app.post('/api/admin/ban', authenticateAdmin, (req, res) => {
@@ -448,11 +543,17 @@ io.on('connection', (socket) => {
           }
         }
 
+        const clientIp = socket.handshake.address || socket.request?.connection?.remoteAddress || '127.0.0.1';
+        const userAgent = socket.handshake.headers['user-agent'] || 'Browser';
+
         activeUsers.set(username, {
           socketId: socket.id,
           username: user.username,
           publicKey: user.publicKey,
-          status: 'online'
+          status: 'online',
+          ip: clientIp,
+          userAgent: userAgent,
+          connectedAt: new Date().toISOString()
         });
         
         broadcastUserList();

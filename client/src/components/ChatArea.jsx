@@ -653,6 +653,7 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
           ) : (
             <input
               type="text"
+              className="chat-input"
               placeholder={t('typeMessage')}
               value={inputText}
               onChange={handleChange}
@@ -661,7 +662,7 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
         </form>
         
         {inputText.trim() ? (
-          <Send size={24} className="icon-btn primary" onClick={handleSend} style={{ backgroundColor: 'var(--primary-color)', color: 'white', padding: '10px', width: '44px', height: '44px' }} />
+          <Send size={24} className="icon-btn primary send-button" onClick={handleSend} style={{ backgroundColor: 'var(--primary-color)', color: 'white', padding: '10px', width: '44px', height: '44px', borderRadius: '50%', cursor: 'pointer', flexShrink: 0 }} />
         ) : (
           <div 
             style={{ position: 'relative' }}

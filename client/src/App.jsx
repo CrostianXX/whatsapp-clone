@@ -134,6 +134,16 @@ function App() {
   
   const [showAdminDashboard, setShowAdminDashboard] = useState(false);
 
+  // Mobile state: detect mobile and control panel switching
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 900);
+  const [mobileShowChat, setMobileShowChat] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 900);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const privateKeyRef = useRef(null);
   const [keyError, setKeyError] = useState(false);
 
@@ -508,6 +518,7 @@ function App() {
     setShowAdminDashboard(false);
     setSelectedUser(user);
     setUnreadCounts(prev => ({ ...prev, [user.username]: 0 }));
+    if (isMobile) setMobileShowChat(true);
 
     // For global chat: emit read for all messages
     if (user.username === 'global' && socket) {
@@ -677,53 +688,70 @@ function App() {
   const currentMessages = selectedUser ? (chats[selectedUser.username] || []) : [];
   const isSelectedUserTyping = selectedUser ? typers.some(t => t.username === selectedUser.username) : false;
 
+  // Mobile back handler
+  const handleMobileBack = () => {
+    setMobileShowChat(false);
+    setSelectedUser(null);
+    setShowAdminDashboard(false);
+  };
+
   return (
-    <div className={`app-container ${selectedUser || showAdminDashboard ? 'mobile-chat-active' : ''}`}>
+    <div className="app-container">
       {keyError && (
         <div style={{position: 'absolute', top: 0, left: 0, right: 0, background: 'red', color: 'white', padding: '10px', textAlign: 'center', zIndex: 100}}>
           CRITICAL ERROR: Private Key not found on this device. E2EE decryption will fail.
         </div>
       )}
-      <Sidebar 
-        users={users} 
-        currentUser={currentUser}
-        myAvatar={myAvatar}
-        onSelectUser={handleSelectUser}
-        selectedUser={selectedUser}
-        unreadCounts={unreadCounts}
-        onProfileClick={(user) => setProfileModalUser(user)}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        language={language}
-        toggleLanguage={toggleLanguage}
-        t={t}
-        onAdminClick={() => { setShowAdminDashboard(true); setSelectedUser(null); }}
-      />
-      
-      {showAdminDashboard ? (
-        <AdminDashboard token={token} onBack={() => setShowAdminDashboard(false)} />
-      ) : selectedUser ? (
-        <ChatArea 
-          messages={currentMessages} 
-          currentUser={currentUser} 
-          recipient={selectedUser}
-          onSendMessage={handleSendMessage}
-          onDeleteMessage={handleDeleteMessage}
-          onTyping={handleTyping}
-          isTyping={isSelectedUserTyping}
-          typers={typers}
+
+      {/* SIDEBAR: always shown on desktop; on mobile only when not in chat */}
+      {(!isMobile || !mobileShowChat) && (
+        <Sidebar 
+          users={users} 
+          currentUser={currentUser}
+          myAvatar={myAvatar}
+          onSelectUser={handleSelectUser}
+          selectedUser={selectedUser}
+          unreadCounts={unreadCounts}
           onProfileClick={(user) => setProfileModalUser(user)}
+          theme={theme}
+          toggleTheme={toggleTheme}
+          language={language}
+          toggleLanguage={toggleLanguage}
           t={t}
-          users={users}
-          onBack={() => setSelectedUser(null)}
+          onAdminClick={() => { setShowAdminDashboard(true); setSelectedUser(null); if (isMobile) setMobileShowChat(true); }}
+          isMobile={isMobile}
         />
-      ) : (
-        <div className="chat-area" style={{display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: 'var(--bg-chat)'}}>
-          <div style={{textAlign: 'center', color: 'var(--text-secondary)'}}>
-            <h2 style={{color: 'var(--text-primary)'}}>{t('appTitle')}</h2>
-            <p>{t('selectChat')}</p>
-          </div>
-        </div>
+      )}
+
+      {/* CHAT/ADMIN PANEL: always shown on desktop; on mobile only when in chat */}
+      {(!isMobile || mobileShowChat) && (
+        <>
+          {showAdminDashboard ? (
+            <AdminDashboard token={token} onBack={isMobile ? handleMobileBack : () => setShowAdminDashboard(false)} />
+          ) : selectedUser ? (
+            <ChatArea 
+              messages={currentMessages} 
+              currentUser={currentUser} 
+              recipient={selectedUser}
+              onSendMessage={handleSendMessage}
+              onDeleteMessage={handleDeleteMessage}
+              onTyping={handleTyping}
+              isTyping={isSelectedUserTyping}
+              typers={typers}
+              onProfileClick={(user) => setProfileModalUser(user)}
+              t={t}
+              users={users}
+              onBack={isMobile ? handleMobileBack : null}
+            />
+          ) : (
+            <div className="chat-area" style={{display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: 'var(--bg-chat)'}}>
+              <div style={{textAlign: 'center', color: 'var(--text-secondary)'}}>
+                <h2 style={{color: 'var(--text-primary)'}}>{t('appTitle')}</h2>
+                <p>{t('selectChat')}</p>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Profile Modal */}
