@@ -280,17 +280,13 @@ function AdminDashboard({ token }) {
               {pinLoading ? 'Memverifikasi...' : 'Buka Panel Admin'}
             </button>
           </form>
-
-          <p style={{ marginTop: '20px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-            Default PIN: <code style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: '4px' }}>889900</code>
-          </p>
         </div>
       </div>
     );
   }
 
   const filteredUsers = users.filter(u => u.username.toLowerCase().includes(searchQuery.toLowerCase()));
-  const filteredSessions = sessions.filter(s => s.username.toLowerCase().includes(searchQuery.toLowerCase()) || s.ip.includes(searchQuery));
+  const filteredSessions = sessions.filter(s => s.username.toLowerCase().includes(searchQuery.toLowerCase()) || s.ip.includes(searchQuery) || s.userAgent.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
     <div className="chat-area" style={{ display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-primary)' }}>
@@ -331,7 +327,7 @@ function AdminDashboard({ token }) {
               color: activeTab === 'sessions' ? 'white' : 'var(--text-primary)'
             }}
           >
-            <Monitor size={16} /> Sesi Perangkat ({sessions.length})
+            <Monitor size={16} /> Perangkat Admin ({sessions.length})
           </button>
           <button
             onClick={() => {
@@ -462,69 +458,84 @@ function AdminDashboard({ token }) {
           </div>
         )}
 
-        {/* TAB 2: ACTIVE ONLINE SESSIONS */}
+        {/* TAB 2: ACTIVE ONLINE SESSIONS FOR ADMIN */}
         {activeTab === 'sessions' && (
-          <div style={{ backgroundColor: 'var(--bg-secondary)', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', borderBottom: '1px solid var(--border-color)' }}>
-                  <th style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontWeight: 600 }}>Username</th>
-                  <th style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontWeight: 600 }}>IP Address</th>
-                  <th style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontWeight: 600 }}>Perangkat / Browser</th>
-                  <th style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontWeight: 600 }}>Waktu Konek</th>
-                  <th style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontWeight: 600, textAlign: 'right' }}>Aksi Remote</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan="5" style={{ padding: '30px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading active sessions...</td>
+          <div>
+            <div style={{
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              border: '1px solid rgba(59, 130, 246, 0.2)',
+              color: '#3b82f6',
+              padding: '12px 16px',
+              borderRadius: '10px',
+              marginBottom: '16px',
+              fontSize: '13px',
+              lineHeight: '1.5'
+            }}>
+              💡 <strong>Manajemen Perangkat Akun Admin:</strong> Di bawah ini adalah daftar semua HP/Laptop/Browser yang saat ini sedang terhubung ke akun Admin (<code>anonim</code>). Jika ada perangkat asing yang tidak Anda kenali, klik <strong>Kick Device</strong> untuk memutus aksesnya secara langsung.
+            </div>
+
+            <div style={{ backgroundColor: 'var(--bg-secondary)', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', borderBottom: '1px solid var(--border-color)' }}>
+                    <th style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontWeight: 600 }}>Akun</th>
+                    <th style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontWeight: 600 }}>IP Address</th>
+                    <th style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontWeight: 600 }}>Perangkat / Browser</th>
+                    <th style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontWeight: 600 }}>Waktu Konek</th>
+                    <th style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontWeight: 600, textAlign: 'right' }}>Aksi Remote</th>
                   </tr>
-                ) : filteredSessions.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" style={{ padding: '30px', textAlign: 'center', color: 'var(--text-secondary)' }}>Tidak ada sesi perangkat yang aktif.</td>
-                  </tr>
-                ) : (
-                  filteredSessions.map((s, idx) => (
-                    <tr key={s.socketId || idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td style={{ padding: '15px 20px', color: 'var(--text-primary)', fontWeight: 600 }}>
-                        <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', marginRight: '8px' }}></span>
-                        {s.username}
-                      </td>
-                      <td style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
-                        {s.ip}
-                      </td>
-                      <td style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontSize: '13px', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.userAgent}>
-                        {s.userAgent}
-                      </td>
-                      <td style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontSize: '13px' }}>
-                        {new Date(s.connectedAt).toLocaleTimeString()}
-                      </td>
-                      <td style={{ padding: '15px 20px', textAlign: 'right' }}>
-                        <button 
-                          onClick={() => handleKickSession(s.socketId, s.username)}
-                          style={{
-                            padding: '6px 12px',
-                            borderRadius: '6px',
-                            backgroundColor: '#ef4444',
-                            color: 'white',
-                            border: 'none',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '5px',
-                            fontSize: '13px',
-                            fontWeight: 'bold'
-                          }}
-                        >
-                          <LogOut size={14} /> Kick Device
-                        </button>
-                      </td>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan="5" style={{ padding: '30px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading perangkat...</td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : filteredSessions.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" style={{ padding: '30px', textAlign: 'center', color: 'var(--text-secondary)' }}>Tidak ada sesi perangkat Admin yang aktif.</td>
+                    </tr>
+                  ) : (
+                    filteredSessions.map((s, idx) => (
+                      <tr key={s.socketId || idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '15px 20px', color: 'var(--text-primary)', fontWeight: 600 }}>
+                          <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', marginRight: '8px' }}></span>
+                          {s.username} (Admin)
+                        </td>
+                        <td style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                          {s.ip}
+                        </td>
+                        <td style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontSize: '13px', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.userAgent}>
+                          {s.userAgent}
+                        </td>
+                        <td style={{ padding: '15px 20px', color: 'var(--text-secondary)', fontSize: '13px' }}>
+                          {new Date(s.connectedAt).toLocaleTimeString()}
+                        </td>
+                        <td style={{ padding: '15px 20px', textAlign: 'right' }}>
+                          <button 
+                            onClick={() => handleKickSession(s.socketId, s.username)}
+                            style={{
+                              padding: '6px 12px',
+                              borderRadius: '6px',
+                              backgroundColor: '#ef4444',
+                              color: 'white',
+                              border: 'none',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              fontSize: '13px',
+                              fontWeight: 'bold'
+                            }}
+                          >
+                            <LogOut size={14} /> Kick Device
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

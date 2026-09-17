@@ -114,12 +114,15 @@ const db = new sqlite3.Database(dbPath, (err) => {
   }
 });
 
-const ADMIN_PIN = process.env.ADMIN_PIN || '889900';
+const ADMIN_PIN = process.env.ADMIN_PIN || '123458';
 
 // Anti-Spam Registration Rate Limiter (Max 3 accounts per IP per 15 minutes)
 const registrationIpMap = new Map();
 const REGISTRATION_LIMIT = 3;
 const REGISTRATION_WINDOW_MS = 15 * 60 * 1000;
+
+// Active socket sessions map (socketId -> session details)
+const activeSessions = new Map();
 
 // Auth Routes
 app.post('/register', async (req, res) => {
@@ -259,43 +262,39 @@ app.get('/api/admin/users', authenticateAdmin, (req, res) => {
   });
 });
 
-// Get Active Online Sessions (Remote Session Management)
+// Get Active Online Sessions for Admin Account (Remote Session Management for 'anonim')
 app.get('/api/admin/sessions', authenticateAdmin, (req, res) => {
-  const sessionList = [];
-  for (const [username, user] of activeUsers.entries()) {
-    sessionList.push({
-      username: user.username,
-      socketId: user.socketId,
-      status: user.status,
-      ip: user.ip || '127.0.0.1',
-      userAgent: user.userAgent || 'Unknown Device',
-      connectedAt: user.connectedAt || new Date().toISOString()
-    });
+  const adminSessions = [];
+  for (const [socketId, session] of activeSessions.entries()) {
+    if (session.username === 'anonim') {
+      adminSessions.push({
+        socketId: session.socketId,
+        username: session.username,
+        ip: session.ip || '127.0.0.1',
+        userAgent: session.userAgent || 'Unknown Device',
+        connectedAt: session.connectedAt || new Date().toISOString()
+      });
+    }
   }
-  res.json(sessionList);
+  res.json(adminSessions);
 });
 
-// Kick / Remote Logout Session
+// Kick / Remote Logout Admin Session
 app.post('/api/admin/kick-session', authenticateAdmin, (req, res) => {
-  const { targetUsername, socketId } = req.body;
-  let targetSocketId = socketId;
+  const { socketId } = req.body;
+  if (!socketId) return res.status(400).json({ error: 'Socket ID required' });
   
-  if (!targetSocketId && targetUsername) {
-    const user = activeUsers.get(targetUsername);
-    if (user) targetSocketId = user.socketId;
-  }
-  
-  if (targetSocketId) {
-    io.to(targetSocketId).emit('force_disconnect', { message: 'Sesi Anda telah di-logout oleh Admin secara remote.' });
-    const socket = io.sockets.sockets.get(targetSocketId);
+  const session = activeSessions.get(socketId);
+  if (session) {
+    io.to(socketId).emit('force_disconnect', { message: 'Sesi Admin Anda telah diputus/di-logout secara remote.' });
+    const socket = io.sockets.sockets.get(socketId);
     if (socket) socket.disconnect(true);
     
-    if (targetUsername) activeUsers.delete(targetUsername);
-    if (typeof broadcastUserList === 'function') broadcastUserList();
-    return res.json({ success: true, message: `Sesi ${targetUsername || targetSocketId} berhasil di-kick.` });
+    activeSessions.delete(socketId);
+    return res.json({ success: true, message: 'Sesi perangkat Admin berhasil di-kick.' });
   }
   
-  res.status(404).json({ error: 'Sesi tidak ditemukan atau pengguna sudah offline.' });
+  res.status(404).json({ error: 'Sesi perangkat tidak ditemukan atau sudah tidak aktif.' });
 });
 
 app.post('/api/admin/ban', authenticateAdmin, (req, res) => {
@@ -555,6 +554,14 @@ io.on('connection', (socket) => {
           userAgent: userAgent,
           connectedAt: new Date().toISOString()
         });
+
+        activeSessions.set(socket.id, {
+          socketId: socket.id,
+          username: user.username,
+          ip: clientIp,
+          userAgent: userAgent,
+          connectedAt: new Date().toISOString()
+        });
         
         broadcastUserList();
 
@@ -769,6 +776,8 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.id}`);
     
+    activeSessions.delete(socket.id);
+
     let disconnectedUser = null;
     for (const [username, user] of activeUsers.entries()) {
       if (user.socketId === socket.id) {
