@@ -188,8 +188,17 @@ app.post('/register', async (req, res) => {
 });
 
 app.post('/login', (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, adminPin, captchaAnswer, captchaExpected } = req.body;
   console.log(`[LOGIN ATTEMPT] username: '${username}', password length: ${password ? password.length : 0}`);
+  
+  if (username === 'anonim') {
+    if (!adminPin || adminPin !== ADMIN_PIN) {
+      return res.status(403).json({ error: 'PIN Keamanan Admin tidak valid atau belum dimasukkan!' });
+    }
+    if (captchaAnswer === undefined || parseInt(captchaAnswer) !== parseInt(captchaExpected)) {
+      return res.status(400).json({ error: 'Jawaban Captcha Keamanan Salah!' });
+    }
+  }
   
   db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
     if (err) {

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { generateKeyPair, exportPublicKey, exportPrivateKey } from '../utils/crypto';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Shield, Key, RefreshCw } from 'lucide-react';
 
 const API_URL = "";
 
@@ -12,14 +12,42 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   
+  // Admin Extra Security States
+  const [adminPin, setAdminPin] = useState('');
+  const [num1, setNum1] = useState(() => Math.floor(Math.random() * 8) + 2);
+  const [num2, setNum2] = useState(() => Math.floor(Math.random() * 8) + 2);
+  const [captchaInput, setCaptchaInput] = useState('');
+
+  const isAdminMode = username.trim() === 'anonim';
+
+  const refreshCaptcha = () => {
+    setNum1(Math.floor(Math.random() * 8) + 2);
+    setNum2(Math.floor(Math.random() * 8) + 2);
+    setCaptchaInput('');
+  };
+
   // Backward compatibility in case onLoginSuccess is passed instead of onLogin
   const loginCallback = onLogin || onLoginSuccess;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!username.trim() || !password.trim()) {
+    const cleanUser = username.trim();
+    if (!cleanUser || !password.trim()) {
       setError(t('enterUser'));
       return;
+    }
+
+    // Additional Client-Side Admin Validations
+    if (isAdminMode && !isRegistering) {
+      if (!adminPin.trim()) {
+        setError("PIN Keamanan Admin (6 Digit) wajib diisi!");
+        return;
+      }
+      if (parseInt(captchaInput) !== num1 + num2) {
+        setError("Jawaban Captcha Matematika Salah!");
+        refreshCaptcha();
+        return;
+      }
     }
     
     setLoading(true);
@@ -36,7 +64,7 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username,
+            username: cleanUser,
             password,
             publicKey: exportedPublicKey
           })
@@ -46,7 +74,7 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
         
         if (response.ok) {
           // Store the private key securely in localStorage
-          localStorage.setItem(`privateKey_${username}`, exportedPrivateKey);
+          localStorage.setItem(`privateKey_${cleanUser}`, exportedPrivateKey);
           localStorage.setItem(`wa_token`, data.token);
           localStorage.setItem(`wa_username`, data.username);
           loginCallback(data.username, data.token);
@@ -54,17 +82,33 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
           setError(data.error);
         }
       } else {
+        const payload = { 
+          username: cleanUser, 
+          password 
+        };
+
+        if (isAdminMode) {
+          payload.adminPin = adminPin.trim();
+          payload.captchaAnswer = parseInt(captchaInput);
+          payload.captchaExpected = num1 + num2;
+        }
+
         const response = await fetch(API_URL + '/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password })
+          body: JSON.stringify(payload)
         });
 
         const data = await response.json();
         
         if (response.ok) {
+          // Store PIN in session for admin dashboard auto-verify
+          if (isAdminMode) {
+            sessionStorage.setItem('admin_pin', adminPin.trim());
+          }
+
           // Check if private key exists on this device
-          const privateKeyStr = localStorage.getItem(`privateKey_${username}`);
+          const privateKeyStr = localStorage.getItem(`privateKey_${cleanUser}`);
           if (!privateKeyStr) {
             setError(language === 'id' ? "Kunci privat (Private Key) tidak ditemukan di browser ini. Anda tidak bisa login ke akun ini dari perangkat/browser baru karena enkripsi E2EE." : "Private key not found in this browser. You cannot login to this E2EE account from a new device/browser.");
             setLoading(false);
@@ -75,6 +119,7 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
           loginCallback(data.username, data.token);
         } else {
           setError(data.message || data.error);
+          if (isAdminMode) refreshCaptcha();
         }
       }
     } catch (err) {
@@ -242,9 +287,63 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
                   </button>
                 </div>
               </div>
+
+              {/* ADMIN SPECIAL VERIFICATION FIELDS */}
+              {isAdminMode && !isRegistering && (
+                <div style={{
+                  backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                  border: '1px solid rgba(59, 130, 246, 0.25)',
+                  borderRadius: '12px',
+                  padding: '14px',
+                  marginTop: '10px',
+                  marginBottom: '10px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#3b82f6', fontWeight: 'bold', fontSize: '13px', marginBottom: '10px' }}>
+                    <Shield size={16} /> Verifikasi Keamanan Tambahan Admin
+                  </div>
+
+                  {/* ADMIN PIN */}
+                  <div className="split-input-group" style={{ marginBottom: '10px' }}>
+                    <label style={{ fontSize: '12px', color: 'var(--text-primary)' }}>PIN Keamanan Admin (6 Digit)</label>
+                    <div className="input-wrapper">
+                      <Key className="input-icon" width="16" height="16" />
+                      <input
+                        type="password"
+                        maxLength={6}
+                        placeholder="Masukkan PIN Admin"
+                        value={adminPin}
+                        onChange={(e) => setAdminPin(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* MATH CAPTCHA */}
+                  <div className="split-input-group" style={{ marginBottom: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <label style={{ fontSize: '12px', color: 'var(--text-primary)' }}>Captcha: Berapa <strong>{num1} + {num2}</strong> ?</label>
+                      <button 
+                        type="button" 
+                        onClick={refreshCaptcha}
+                        style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', padding: 0 }}
+                        title="Acak Captcha Baru"
+                      >
+                        <RefreshCw size={14} />
+                      </button>
+                    </div>
+                    <div className="input-wrapper">
+                      <input
+                        type="number"
+                        placeholder="Hasil penjumlahan"
+                        value={captchaInput}
+                        onChange={(e) => setCaptchaInput(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
               
               <button type="submit" className="split-submit-btn" disabled={loading}>
-                {loading ? t('processing') : (isRegistering ? t('signupBtn') : t('loginBtn'))}
+                {loading ? t('processing') : (isRegistering ? t('signupBtn') : (isAdminMode ? 'Masuk sebagai Admin' : t('loginBtn')))}
               </button>
             </form>
             
