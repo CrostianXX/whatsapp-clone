@@ -195,8 +195,8 @@ app.post('/login', (req, res) => {
     if (!adminPin || adminPin !== ADMIN_PIN) {
       return res.status(403).json({ error: 'PIN Keamanan Admin tidak valid atau belum dimasukkan!' });
     }
-    if (captchaAnswer === undefined || parseInt(captchaAnswer) !== parseInt(captchaExpected)) {
-      return res.status(400).json({ error: 'Jawaban Captcha Keamanan Salah!' });
+    if (!captchaAnswer || !captchaExpected || captchaAnswer.toString().toUpperCase() !== captchaExpected.toString().toUpperCase()) {
+      return res.status(400).json({ error: 'Kode Captcha Gambar Salah!' });
     }
   }
   
