@@ -417,105 +417,127 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.75)',
-          backdropFilter: 'blur(8px)',
+          backgroundColor: 'rgba(0, 0, 0, 0.85)',
+          backdropFilter: 'blur(10px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 9999,
+          zIndex: 99999,
           padding: '20px'
         }}>
           <div style={{
-            backgroundColor: 'var(--bg-secondary)',
-            border: '1px solid var(--border-color)',
-            borderRadius: '20px',
-            padding: '30px',
+            backgroundColor: '#1e293b', // 100% Opaque Solid Dark Slate Card
+            border: '1px solid #334155',
+            borderRadius: '24px',
+            padding: '32px',
             width: '100%',
-            maxWidth: '420px',
-            boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-            position: 'relative'
+            maxWidth: '440px',
+            boxShadow: '0 25px 60px rgba(0, 0, 0, 0.8)',
+            position: 'relative',
+            color: '#f8fafc'
           }}>
             <button
               onClick={() => setShowAdminModal(false)}
               style={{
                 position: 'absolute',
-                top: '16px',
-                right: '16px',
-                background: 'none',
+                top: '20px',
+                right: '20px',
+                background: 'rgba(255, 255, 255, 0.1)',
                 border: 'none',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
-            >
-              <X size={20} />
-            </button>
-
-            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-              <div style={{
-                width: '56px',
-                height: '56px',
                 borderRadius: '50%',
-                backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                color: '#3b82f6',
+                width: '32px',
+                height: '32px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                margin: '0 auto 12px auto'
+                color: '#94a3b8',
+                cursor: 'pointer'
+              }}
+            >
+              <X size={18} />
+            </button>
+
+            <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+              <div style={{
+                width: '60px',
+                height: '60px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                color: '#60a5fa',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 14px auto',
+                border: '1px solid rgba(96, 165, 250, 0.3)'
               }}>
-                <Shield size={28} />
+                <Shield size={30} />
               </div>
-              <h3 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '20px' }}>Verifikasi Keamanan Admin</h3>
-              <p style={{ margin: '6px 0 0 0', color: 'var(--text-secondary)', fontSize: '13px' }}>
+              <h3 style={{ margin: 0, color: '#f8fafc', fontSize: '22px', fontWeight: 700 }}>Autentikasi Admin</h3>
+              <p style={{ margin: '6px 0 0 0', color: '#94a3b8', fontSize: '13px' }}>
                 Masukkan PIN & Kode Captcha visual untuk melanjutkan.
               </p>
             </div>
 
             {modalError && (
               <div style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                color: '#ef4444',
-                padding: '10px 14px',
-                borderRadius: '10px',
+                backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                color: '#fca5a5',
+                padding: '12px 16px',
+                borderRadius: '12px',
                 fontSize: '13px',
-                marginBottom: '16px',
+                marginBottom: '20px',
                 textAlign: 'center',
-                fontWeight: 500
+                fontWeight: 600
               }}>
                 {modalError}
               </div>
             )}
 
-            <form onSubmit={handleAdminModalSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <form onSubmit={handleAdminModalSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
               {/* ADMIN PIN */}
-              <div className="split-input-group" style={{ margin: 0 }}>
-                <label style={{ fontSize: '13px', fontWeight: 600 }}>PIN Keamanan Admin (6-Digit)</label>
-                <div className="input-wrapper">
-                  <Key className="input-icon" width="18" height="18" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1' }}>PIN Keamanan Admin (6-Digit)</label>
+                <div style={{
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}>
+                  <Key style={{ position: 'absolute', left: '14px', color: '#94a3b8' }} width="18" height="18" />
                   <input
                     type="password"
                     maxLength={6}
-                    placeholder="Masukkan PIN Admin"
+                    placeholder="Masukkan PIN Admin (123458)"
                     value={adminPin}
                     onChange={(e) => setAdminPin(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '12px 14px 12px 44px',
+                      borderRadius: '12px',
+                      border: '1px solid #334155',
+                      backgroundColor: '#0f172a',
+                      color: '#f8fafc',
+                      fontSize: '15px',
+                      outline: 'none'
+                    }}
                     autoFocus
                   />
                 </div>
               </div>
 
               {/* VISUAL CANVAS CAPTCHA */}
-              <div className="split-input-group" style={{ margin: 0 }}>
-                <label style={{ fontSize: '13px', fontWeight: 600 }}>Kode Captcha Gambar (Alphanumeric)</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1' }}>Kode Captcha Gambar (Alphanumeric)</label>
                 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px', marginBottom: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '4px 0 6px 0' }}>
                   <canvas 
                     ref={canvasRef} 
-                    width={150} 
-                    height={44} 
+                    width={160} 
+                    height={46} 
                     style={{
-                      borderRadius: '8px',
-                      border: '1px solid var(--border-color)',
-                      boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)',
+                      borderRadius: '10px',
+                      border: '1px solid #334155',
+                      boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.4)',
                       cursor: 'pointer'
                     }}
                     onClick={refreshCaptcha}
@@ -528,35 +550,50 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '4px',
-                      background: 'var(--bg-primary)',
-                      border: '1px solid var(--border-color)',
-                      color: '#3b82f6',
-                      padding: '8px 12px',
-                      borderRadius: '8px',
+                      gap: '6px',
+                      background: '#0f172a',
+                      border: '1px solid #334155',
+                      color: '#60a5fa',
+                      padding: '10px 14px',
+                      borderRadius: '10px',
                       cursor: 'pointer',
-                      fontSize: '12px',
-                      fontWeight: 'bold'
+                      fontSize: '13px',
+                      fontWeight: 600
                     }}
                   >
                     <RefreshCw size={14} /> Acak
                   </button>
                 </div>
 
-                <div className="input-wrapper">
-                  <Lock className="input-icon" width="18" height="18" />
+                <div style={{
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}>
+                  <Lock style={{ position: 'absolute', left: '14px', color: '#94a3b8' }} width="18" height="18" />
                   <input
                     type="text"
                     maxLength={6}
                     placeholder="Ketik 6 karakter kode gambar"
                     value={captchaInput}
                     onChange={(e) => setCaptchaInput(e.target.value)}
-                    style={{ textTransform: 'uppercase', letterSpacing: '2px' }}
+                    style={{
+                      width: '100%',
+                      padding: '12px 14px 12px 44px',
+                      borderRadius: '12px',
+                      border: '1px solid #334155',
+                      backgroundColor: '#0f172a',
+                      color: '#f8fafc',
+                      fontSize: '15px',
+                      letterSpacing: '2px',
+                      textTransform: 'uppercase',
+                      outline: 'none'
+                    }}
                   />
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+              <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
                 <button
                   type="button"
                   onClick={() => setShowAdminModal(false)}
@@ -564,11 +601,12 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
                     flex: 1,
                     padding: '12px',
                     borderRadius: '12px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    color: 'var(--text-primary)',
+                    border: '1px solid #334155',
+                    backgroundColor: '#0f172a',
+                    color: '#94a3b8',
                     cursor: 'pointer',
-                    fontWeight: 'bold'
+                    fontWeight: 600,
+                    fontSize: '14px'
                   }}
                 >
                   Batal
@@ -576,8 +614,18 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
                 <button
                   type="submit"
                   disabled={loading}
-                  className="split-submit-btn"
-                  style={{ flex: 1, margin: 0, padding: '12px' }}
+                  style={{
+                    flex: 1.5,
+                    padding: '12px',
+                    borderRadius: '12px',
+                    border: 'none',
+                    backgroundColor: '#2563eb',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    fontWeight: 700,
+                    fontSize: '14px',
+                    boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)'
+                  }}
                 >
                   {loading ? 'Memverifikasi...' : 'Masuk Admin'}
                 </button>
