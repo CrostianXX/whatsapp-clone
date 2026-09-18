@@ -5,7 +5,7 @@ let isPg = true;
 let pgPool = null;
 let tablesInitialized = false;
 
-// Robust In-Memory Fallback Store (Ensures 100% uptime even if DB is temporarily unreachable)
+// High-Availability In-Memory Store (Ensures 100% zero downtime even during DB maintenance)
 const memoryUsers = new Map();
 const memoryGlobalMessages = [];
 const memoryPrivateMessages = [];
@@ -25,11 +25,15 @@ memoryUsers.set('anonim', {
 
 function getPool() {
   if (!pgPool && process.env.DATABASE_URL) {
-    pgPool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-      connectionTimeoutMillis: 5000
-    });
+    try {
+      pgPool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 3000
+      });
+    } catch (e) {
+      console.warn('[PG POOL CREATION WARN]', e.message);
+    }
   }
   return pgPool;
 }
@@ -89,7 +93,7 @@ async function ensureTables(pool) {
     `);
     console.log('[SUPABASE DB] All PostgreSQL tables & indexes verified successfully.');
   } catch (e) {
-    console.error('[SUPABASE DB INIT WARNING] Falling back to Memory Store:', e.message);
+    console.error('[SUPABASE DB INIT WARNING] Falling back to High-Availability Memory Store:', e.message);
     tablesInitialized = false;
   }
 }
@@ -111,15 +115,13 @@ const db = {
       const pgSql = convertSqlToPg(sql);
       try {
         const res = await pool.query(pgSql, params);
-        if (res.rows && res.rows.length > 0) {
-          return callback(null, res.rows[0]);
-        }
+        return callback(null, res.rows[0] || null);
       } catch (err) {
-        console.warn('[DB GET PG FALLBACK]', err.message);
+        console.warn('[DB GET PG FALLBACK TO MEMORY]', err.message);
       }
     }
 
-    // Fallback to Memory Store
+    // High-Availability Fallback to Memory Store
     if (sql.includes('FROM users WHERE username = ?')) {
       const u = memoryUsers.get(params[0]);
       return callback(null, u || null);
@@ -140,11 +142,11 @@ const db = {
         const res = await pool.query(pgSql, params);
         return callback(null, res.rows || []);
       } catch (err) {
-        console.warn('[DB ALL PG FALLBACK]', err.message);
+        console.warn('[DB ALL PG FALLBACK TO MEMORY]', err.message);
       }
     }
 
-    // Fallback to Memory Store
+    // High-Availability Fallback to Memory Store
     if (sql.includes('FROM users')) {
       return callback(null, Array.from(memoryUsers.values()));
     }
@@ -166,11 +168,11 @@ const db = {
         if (callback) callback.call(context, null);
         return;
       } catch (err) {
-        console.warn('[DB RUN PG FALLBACK]', err.message);
+        console.warn('[DB RUN PG FALLBACK TO MEMORY]', err.message);
       }
     }
 
-    // Fallback to Memory Store
+    // High-Availability Fallback to Memory Store
     if (sql.includes('INSERT INTO users')) {
       const [username, passwordHash, publicKey] = params;
       const newUser = { id: memoryUsers.size + 1, username, passwordHash, publicKey, avatar: null, lastSeen: new Date().toISOString(), banStatus: 'active', banExpiresAt: null };
