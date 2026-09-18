@@ -507,7 +507,39 @@ app.post('/api/update-avatar', (req, res) => {
 });
 
 // Map of username -> socket.id for active routing
-const activeUsers = new Map();
+// Helper to get active users list
+const getUserList = (cb) => {
+  db.all("SELECT username, publicKey, avatar, lastSeen FROM users", (err, rows) => {
+    if (err) {
+      console.error("getUserList Error:", err);
+      return cb ? cb([]) : null;
+    }
+    
+    const allUsers = rows.map(row => {
+      const room = io.sockets.adapter.rooms.get(row.username);
+      const isOnline = (room && room.size > 0) || activeUsers.has(row.username);
+      let avatar = row.avatar;
+      if (avatar && avatar.length > 5000) {
+        avatar = null;
+      }
+      return {
+        username: row.username,
+        publicKey: row.publicKey,
+        avatar: avatar,
+        lastSeen: row.lastSeen,
+        status: isOnline ? 'online' : 'offline'
+      };
+    });
+    if (cb) cb(allUsers);
+  });
+};
+
+// Public REST endpoint for user list
+app.get('/api/users', (req, res) => {
+  getUserList((allUsers) => {
+    res.json(allUsers);
+  });
+});
 
 // Helper to broadcast active users (only usernames, public keys, and avatars)
 // Debounced to prevent flooding when many sockets connect/disconnect rapidly
@@ -515,30 +547,7 @@ let broadcastTimer = null;
 const broadcastUserList = () => {
   if (broadcastTimer) clearTimeout(broadcastTimer);
   broadcastTimer = setTimeout(() => {
-    db.all("SELECT username, publicKey, avatar, lastSeen FROM users", (err, rows) => {
-      if (err) {
-        console.error("broadcastUserList Error:", err);
-        return;
-      }
-      
-      const allUsers = rows.map(row => {
-        const room = io.sockets.adapter.rooms.get(row.username);
-        const isOnline = (room && room.size > 0) || activeUsers.has(row.username);
-        // IMPORTANT: Only include avatar if it's a short URL (not a huge base64 blob)
-        // Base64 avatars > 5KB cause parse errors when broadcast to all clients
-        let avatar = row.avatar;
-        if (avatar && avatar.length > 5000) {
-          avatar = null; // Too large for broadcast, client will use default
-        }
-        return {
-          username: row.username,
-          publicKey: row.publicKey,
-          avatar: avatar,
-          lastSeen: row.lastSeen,
-          status: isOnline ? 'online' : 'offline'
-        };
-      });
-      
+    getUserList((allUsers) => {
       io.emit('users_list', allUsers);
     });
   }, 300); // 300ms debounce
@@ -579,6 +588,11 @@ io.on('connection', (socket) => {
       ip: clientIp,
       userAgent: userAgent,
       connectedAt: new Date().toISOString()
+    });
+
+    // Send user list directly to the joining client IMMEDIATELY
+    getUserList((allUsers) => {
+      socket.emit('users_list', allUsers);
     });
 
     broadcastUserList();

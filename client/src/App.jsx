@@ -120,7 +120,15 @@ function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('wa_theme') || 'dark');
   const [language, setLanguage] = useState(() => localStorage.getItem('wa_language') || 'en');
   
-  const [users, setUsers] = useState([]);
+const GLOBAL_ROOM = {
+  username: 'global',
+  displayName: 'Global Server',
+  isGroup: true,
+  status: 'online',
+  avatar: '/logo.png'
+};
+
+  const [users, setUsers] = useState([GLOBAL_ROOM]);
   const [selectedUser, setSelectedUser] = useState(null);
   const selectedUserRef = useRef(null);
   const [chats, setChats] = useState({});
@@ -246,10 +254,27 @@ function App() {
         return;
       }
       
+      // Fetch initial user list via REST API so users load immediately
+      try {
+        const res = await fetch('/api/users');
+        if (res.ok) {
+          const userList = await res.json();
+          const me = userList.find(u => u.username === currentUser);
+          if (me && me.avatar) setMyAvatar(me.avatar);
+          setUsers([GLOBAL_ROOM, ...userList.filter(u => u.username !== currentUser)]);
+        }
+      } catch (err) {
+        console.error("Failed to fetch initial user list via REST:", err);
+      }
+
       newSocket.on('connect', () => {
         console.log("Socket connected with ID:", newSocket.id);
         newSocket.emit('join', currentUser);
       });
+
+      if (newSocket.connected) {
+        newSocket.emit('join', currentUser);
+      }
 
       newSocket.on('reconnect', (attemptNumber) => {
         console.log(`Socket reconnected after ${attemptNumber} attempts`);
@@ -265,17 +290,10 @@ function App() {
       });
 
       newSocket.on('users_list', (userList) => {
-        const globalRoom = {
-           username: 'global',
-           displayName: 'Global Server',
-           isGroup: true,
-           status: 'online',
-           avatar: '/logo.png'
-        };
         const me = userList.find(u => u.username === currentUser);
         if (me && me.avatar) setMyAvatar(me.avatar);
         
-        setUsers([globalRoom, ...userList.filter(u => u.username !== currentUser)]);
+        setUsers([GLOBAL_ROOM, ...userList.filter(u => u.username !== currentUser)]);
       });
 
       newSocket.on('private_message', async (data) => {
