@@ -541,12 +541,17 @@ const broadcastUserList = () => {
 
 io.on('connection', (socket) => {
 
+  socket.on('error', (err) => {
+    console.error(`Socket ${socket.id} error:`, err.message);
+  });
 
   // Handle user joining (authenticating their socket)
   socket.on('join', (username) => {
     if (!username) return;
+    console.log(`[JOIN] ${username} joined with socket ${socket.id}`);
     socket.username = username;
     socket.join(username); // Join socket room for this user
+
 
     const clientIp = socket.handshake.address || socket.request?.connection?.remoteAddress || '127.0.0.1';
     const userAgent = socket.handshake.headers['user-agent'] || 'Browser';
@@ -602,18 +607,38 @@ io.on('connection', (socket) => {
         // Send global chat history to the newly joined user
         db.all('SELECT * FROM global_messages ORDER BY timestamp ASC LIMIT 100', (err, rows) => {
           if (!err && rows) {
-            const history = rows.map(row => ({
-              messageId: row.messageId,
-              from: row.sender,
-              message: row.message,
-              type: row.type,
-              mimeType: row.mimeType,
-              fileName: row.fileName,
-              fileBuffer: row.fileBuffer,
-              replyTo: row.replyTo ? JSON.parse(row.replyTo) : null,
-              timestamp: row.timestamp,
-              reactions: row.reactions ? JSON.parse(row.reactions) : {}
-            }));
+            const history = [];
+            for (const row of rows) {
+              try {
+                history.push({
+                  messageId: row.messageId,
+                  from: row.sender,
+                  message: row.message,
+                  type: row.type,
+                  mimeType: row.mimeType,
+                  fileName: row.fileName,
+                  fileBuffer: row.type === 'media' ? row.fileBuffer : null,
+                  replyTo: row.replyTo ? JSON.parse(row.replyTo) : null,
+                  timestamp: row.timestamp,
+                  reactions: row.reactions ? JSON.parse(row.reactions) : {}
+                });
+              } catch (parseErr) {
+                console.error("Error parsing global message row:", row.messageId, parseErr.message);
+                // Still include the message but with safe defaults
+                history.push({
+                  messageId: row.messageId,
+                  from: row.sender,
+                  message: row.message,
+                  type: row.type || 'text',
+                  mimeType: null,
+                  fileName: null,
+                  fileBuffer: null,
+                  replyTo: null,
+                  timestamp: row.timestamp,
+                  reactions: {}
+                });
+              }
+            }
             socket.emit('global_history', history);
           }
         });
