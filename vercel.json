@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "buildCommand": "cd client && npm install && npm run build",
+  "outputDirectory": "client/dist",
+  "rewrites": [
+    {
+      "source": "/register",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/login",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/upload",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/socket.io/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/((?!api|register|login|upload|socket.io).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
