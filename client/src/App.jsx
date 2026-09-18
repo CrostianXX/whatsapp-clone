@@ -280,25 +280,37 @@ const GLOBAL_ROOM = {
         let pubKeyStr = localStorage.getItem(`publicKey_${currentUser}`);
 
         let validKeyLoaded = false;
-        if (privKeyStr && pubKeyStr) {
+        if (privKeyStr && pubKeyStr && privKeyStr !== 'undefined' && pubKeyStr !== 'null') {
           try {
-            privateKeyRef.current = await importPrivateKey(privKeyStr);
-            validKeyLoaded = true;
+            const imported = await importPrivateKey(privKeyStr);
+            if (imported) {
+              privateKeyRef.current = imported;
+              validKeyLoaded = true;
+            }
           } catch (err) {
-            console.warn("Corrupted or invalid private key in localStorage, regenerating fresh keys...", err);
+            console.warn("Corrupted private key in localStorage, regenerating fresh keys...", err);
           }
         }
 
         if (!validKeyLoaded) {
-          const keyPair = await generateKeyPair();
-          pubKeyStr = await exportPublicKey(keyPair.publicKey);
-          privKeyStr = await exportPrivateKey(keyPair.privateKey);
-          localStorage.setItem(`publicKey_${currentUser}`, pubKeyStr);
-          localStorage.setItem(`privateKey_${currentUser}`, privKeyStr);
-          privateKeyRef.current = await importPrivateKey(privKeyStr);
+          try {
+            const keyPair = await generateKeyPair();
+            pubKeyStr = await exportPublicKey(keyPair.publicKey);
+            privKeyStr = await exportPrivateKey(keyPair.privateKey);
+            localStorage.setItem(`publicKey_${currentUser}`, pubKeyStr);
+            localStorage.setItem(`privateKey_${currentUser}`, privKeyStr);
+            privateKeyRef.current = await importPrivateKey(privKeyStr);
+            validKeyLoaded = true;
+          } catch (genErr) {
+            console.error("Key generation failed:", genErr);
+          }
         }
 
-        setKeyError(false);
+        if (privateKeyRef.current) {
+          setKeyError(false);
+        } else {
+          setKeyError(true);
+        }
 
         if (pubKeyStr && token) {
           fetch('/api/user/profile', {
@@ -311,8 +323,9 @@ const GLOBAL_ROOM = {
           }).catch(() => {});
         }
       } catch (e) {
-        console.error("Error loading or generating E2EE keys", e);
-        setKeyError(true);
+        console.error("Error in initApp:", e);
+        if (privateKeyRef.current) setKeyError(false);
+        else setKeyError(true);
       }
 
       if (isCancelled) return;
@@ -1148,8 +1161,18 @@ const GLOBAL_ROOM = {
   return (
     <div className="app-container">
       {keyError && (
-        <div style={{position: 'absolute', top: 0, left: 0, right: 0, background: 'red', color: 'white', padding: '10px', textAlign: 'center', zIndex: 100}}>
-          CRITICAL ERROR: Private Key not found on this device. E2EE decryption will fail.
+        <div style={{position: 'absolute', top: 0, left: 0, right: 0, background: '#dc2626', color: 'white', padding: '10px 16px', textAlign: 'center', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', fontSize: '13px', fontWeight: 'bold'}}>
+          <span>Kunci privat E2EE pada perangkat ini tidak cocok atau belum disinkronkan.</span>
+          <button 
+            onClick={async () => {
+              localStorage.removeItem(`privateKey_${currentUser}`);
+              localStorage.removeItem(`publicKey_${currentUser}`);
+              window.location.reload();
+            }}
+            style={{background: 'white', color: '#dc2626', border: 'none', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.2)'}}
+          >
+            Reset & Regenerasi Kunci Otomatis
+          </button>
         </div>
       )}
 
