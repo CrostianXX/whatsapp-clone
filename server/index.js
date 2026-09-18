@@ -542,6 +542,7 @@ io.on('connection', (socket) => {
   // Handle user joining (authenticating their socket)
   socket.on('join', (username) => {
     if (!username) return;
+    socket.username = username;
 
     const clientIp = socket.handshake.address || socket.request?.connection?.remoteAddress || '127.0.0.1';
     const userAgent = socket.handshake.headers['user-agent'] || 'Browser';
@@ -555,6 +556,7 @@ io.on('connection', (socket) => {
       userAgent: userAgent,
       connectedAt: new Date().toISOString()
     });
+
 
     activeSessions.set(socket.id, {
       socketId: socket.id,
@@ -820,28 +822,26 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
+  socket.on('disconnect', (reason) => {
+    console.log(`User disconnected: ${socket.id} | Reason: ${reason}`);
     
     activeSessions.delete(socket.id);
 
-    let disconnectedUser = null;
-    for (const [username, user] of activeUsers.entries()) {
-      if (user.socketId === socket.id) {
-        disconnectedUser = username;
-        activeUsers.delete(username);
-        break;
+    const disconnectedUser = socket.username;
+    if (disconnectedUser) {
+      const active = activeUsers.get(disconnectedUser);
+      // ONLY remove user from activeUsers if this disconnected socket is still the active one!
+      if (active && active.socketId === socket.id) {
+        activeUsers.delete(disconnectedUser);
+        const now = new Date().toISOString();
+        db.run("UPDATE users SET lastSeen = ? WHERE username = ?", [now, disconnectedUser], (err) => {
+          if (err) console.error("Failed to update lastSeen", err);
+          broadcastUserList();
+        });
       }
     }
-    
-    if (disconnectedUser) {
-      const now = new Date().toISOString();
-      db.run("UPDATE users SET lastSeen = ? WHERE username = ?", [now, disconnectedUser], (err) => {
-        if (err) console.error("Failed to update lastSeen", err);
-        broadcastUserList();
-      });
-    }
   });
+
 });
 
 // Serve static frontend in production

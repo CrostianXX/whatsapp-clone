@@ -230,9 +230,10 @@ function App() {
 
       if (isCancelled) return;
 
-      // Key is now ready (or failed). Now connect socket.
+      // Key is now ready (or failed). Now connect socket using WebSocket transport directly.
       const newSocket = io(SOCKET_SERVER_URL, {
-        auth: { token }
+        auth: { token },
+        transports: ['websocket']
       });
 
       if (isCancelled) {
@@ -241,8 +242,10 @@ function App() {
       }
       
       newSocket.on('connect', () => {
+        console.log("Socket connected successfully with ID:", newSocket.id);
         newSocket.emit('join', currentUser);
       });
+
 
       newSocket.on('force_disconnect', (data) => {
         alert(data.message || 'You have been disconnected.');
