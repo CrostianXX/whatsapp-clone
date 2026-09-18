@@ -27,7 +27,15 @@ export const exportPrivateKey = async (key) => {
 export const importPublicKey = async (jwkString) => {
   let jwk = jwkString;
   while (typeof jwk === 'string') {
-    jwk = JSON.parse(jwk);
+    try {
+      jwk = JSON.parse(jwk);
+    } catch (e) {
+      break;
+    }
+  }
+  if (jwk && typeof jwk === 'object') {
+    delete jwk.alg;
+    delete jwk.key_ops;
   }
   return await window.crypto.subtle.importKey(
     "jwk",
@@ -44,7 +52,15 @@ export const importPublicKey = async (jwkString) => {
 export const importPrivateKey = async (jwkString) => {
   let jwk = jwkString;
   while (typeof jwk === 'string') {
-    jwk = JSON.parse(jwk);
+    try {
+      jwk = JSON.parse(jwk);
+    } catch (e) {
+      break;
+    }
+  }
+  if (jwk && typeof jwk === 'object') {
+    delete jwk.alg;
+    delete jwk.key_ops;
   }
   return await window.crypto.subtle.importKey(
     "jwk",

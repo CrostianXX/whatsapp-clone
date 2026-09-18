@@ -1160,21 +1160,6 @@ const GLOBAL_ROOM = {
 
   return (
     <div className="app-container">
-      {keyError && (
-        <div style={{position: 'absolute', top: 0, left: 0, right: 0, background: '#dc2626', color: 'white', padding: '10px 16px', textAlign: 'center', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', fontSize: '13px', fontWeight: 'bold'}}>
-          <span>Kunci privat E2EE pada perangkat ini tidak cocok atau belum disinkronkan.</span>
-          <button 
-            onClick={async () => {
-              localStorage.removeItem(`privateKey_${currentUser}`);
-              localStorage.removeItem(`publicKey_${currentUser}`);
-              window.location.reload();
-            }}
-            style={{background: 'white', color: '#dc2626', border: 'none', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.2)'}}
-          >
-            Reset & Regenerasi Kunci Otomatis
-          </button>
-        </div>
-      )}
 
       {/* SIDEBAR: always shown on desktop; on mobile only when not in chat */}
       {(!isMobile || !mobileShowChat) && (
