@@ -187,16 +187,62 @@ const GLOBAL_ROOM = {
     return translations[language][key] || key;
   };
 
+  const processMediaObj = (fileBuffer, fileName, explicitMime) => {
+    let resolvedMime = explicitMime;
+    if (!resolvedMime || !resolvedMime.includes('/')) {
+      if (fileName) {
+        const ext = fileName.toLowerCase().split('.').pop();
+        if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) resolvedMime = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+        else if (['mp4', 'webm', 'ogg', 'mov', 'mkv', 'avi'].includes(ext)) resolvedMime = `video/${ext === 'mov' ? 'mp4' : ext}`;
+        else if (['mp3', 'wav', 'm4a', 'aac'].includes(ext)) resolvedMime = `audio/${ext === 'mp3' ? 'mpeg' : ext}`;
+        else resolvedMime = 'image/jpeg';
+      } else {
+        resolvedMime = 'image/jpeg';
+      }
+    }
+
+    if (!fileBuffer) {
+      return { mediaUrl: null, mimeType: resolvedMime };
+    }
+
+    if (typeof fileBuffer === 'string') {
+      if (fileBuffer.startsWith('data:') || fileBuffer.startsWith('http:') || fileBuffer.startsWith('https:') || fileBuffer.startsWith('blob:')) {
+        return { mediaUrl: fileBuffer, mimeType: resolvedMime };
+      }
+      return { mediaUrl: `data:${resolvedMime};base64,${fileBuffer}`, mimeType: resolvedMime };
+    }
+
+    if (typeof fileBuffer === 'object' && fileBuffer !== null) {
+      if (fileBuffer.type === 'Buffer' && Array.isArray(fileBuffer.data)) {
+        const uint8 = new Uint8Array(fileBuffer.data);
+        const blob = new Blob([uint8], { type: resolvedMime });
+        return { mediaUrl: URL.createObjectURL(blob), mimeType: resolvedMime, blob };
+      }
+      if (fileBuffer instanceof ArrayBuffer || fileBuffer instanceof Uint8Array) {
+        const blob = new Blob([fileBuffer], { type: resolvedMime });
+        return { mediaUrl: URL.createObjectURL(blob), mimeType: resolvedMime, blob };
+      }
+    }
+
+    return { mediaUrl: null, mimeType: resolvedMime };
+  };
+
   useEffect(() => {
     if (currentUser) {
       localforage.getItem(`chats_${currentUser}`).then((savedChats) => {
         if (savedChats) {
-          // Re-generate object URLs for Blobs since old ones die on page refresh
           const hydratedChats = {};
           for (const user in savedChats) {
              hydratedChats[user] = savedChats[user].map(msg => {
-                if (msg.type === 'media' && msg.blob) {
-                   return { ...msg, mediaUrl: URL.createObjectURL(msg.blob) };
+                if (msg.type === 'media') {
+                   if (msg.mediaUrl && (msg.mediaUrl.startsWith('data:') || msg.mediaUrl.startsWith('http:') || msg.mediaUrl.startsWith('https:'))) {
+                     return msg;
+                   }
+                   if (msg.blob) {
+                     return { ...msg, mediaUrl: URL.createObjectURL(msg.blob) };
+                   }
+                   const { mediaUrl, mimeType: resMime } = processMediaObj(msg.fileBuffer, msg.fileName, msg.mimeType);
+                   return { ...msg, mediaUrl: mediaUrl || msg.mediaUrl, mimeType: resMime };
                 }
                 return msg;
              });
@@ -369,11 +415,11 @@ const GLOBAL_ROOM = {
                   if (type === 'text') {
                     finalMsgObj.text = message;
                   } else if (type === 'media' && fileBuffer) {
-                    const blob = new Blob([fileBuffer], { type: mimeType });
+                    const { mediaUrl, mimeType: resMime, blob } = processMediaObj(fileBuffer, fileName, mimeType);
                     finalMsgObj.fileName = fileName;
-                    finalMsgObj.mimeType = mimeType;
-                    finalMsgObj.blob = blob;
-                    finalMsgObj.mediaUrl = URL.createObjectURL(blob);
+                    finalMsgObj.mimeType = resMime;
+                    finalMsgObj.mediaUrl = mediaUrl;
+                    if (blob) finalMsgObj.blob = blob;
                   }
 
                   if (existing) {
@@ -596,11 +642,11 @@ const GLOBAL_ROOM = {
         if (type === 'text') {
           finalMsgObj.text = message;
         } else if (type === 'media') {
-          const blob = new Blob([fileBuffer], { type: mimeType });
+          const { mediaUrl, mimeType: resMime, blob } = processMediaObj(fileBuffer, fileName, mimeType);
           finalMsgObj.fileName = fileName;
-          finalMsgObj.mimeType = mimeType;
-          finalMsgObj.blob = blob;
-          finalMsgObj.mediaUrl = URL.createObjectURL(blob);
+          finalMsgObj.mimeType = resMime;
+          finalMsgObj.mediaUrl = mediaUrl;
+          if (blob) finalMsgObj.blob = blob;
         }
 
         setChats(prev => {
@@ -645,11 +691,11 @@ const GLOBAL_ROOM = {
               if (type === 'text') {
                 finalMsgObj.text = message;
               } else if (type === 'media') {
-                const blob = new Blob([fileBuffer], { type: mimeType });
+                const { mediaUrl, mimeType: resMime, blob } = processMediaObj(fileBuffer, fileName, mimeType);
                 finalMsgObj.fileName = fileName;
-                finalMsgObj.mimeType = mimeType;
-                finalMsgObj.blob = blob;
-                finalMsgObj.mediaUrl = URL.createObjectURL(blob);
+                finalMsgObj.mimeType = resMime;
+                finalMsgObj.mediaUrl = mediaUrl;
+                if (blob) finalMsgObj.blob = blob;
               }
               existingMessages.set(finalMsgObj.id, finalMsgObj);
             }
@@ -834,11 +880,11 @@ const GLOBAL_ROOM = {
         if (payload.type === 'text') {
           localGlobalMsg.text = payload.text;
         } else if (payload.type === 'media') {
-          const blob = new Blob([payload.fileBuffer], { type: payload.mimeType });
+          const { mediaUrl, mimeType: resMime, blob } = processMediaObj(payload.fileBuffer, payload.fileName, payload.mimeType);
           localGlobalMsg.fileName = payload.fileName;
-          localGlobalMsg.mimeType = payload.mimeType;
-          localGlobalMsg.blob = blob;
-          localGlobalMsg.mediaUrl = URL.createObjectURL(blob);
+          localGlobalMsg.mimeType = resMime;
+          localGlobalMsg.mediaUrl = mediaUrl;
+          if (blob) localGlobalMsg.blob = blob;
         }
         setChats(prev => {
           const globalChat = prev['global'] || [];
