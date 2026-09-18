@@ -158,18 +158,18 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
 
     const reader = new FileReader();
     reader.onload = function(event) {
-      const arrayBuffer = event.target.result;
+      const dataUrl = event.target.result;
       
       onSendMessage({
         type: 'media',
-        fileBuffer: arrayBuffer,
+        fileBuffer: dataUrl,
         fileName: file.name,
-        mimeType: file.type,
+        mimeType: file.type || (file.name.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg'),
         replyTo: replyingTo
       });
       setReplyingTo(null);
     };
-    reader.readAsArrayBuffer(file);
+    reader.readAsDataURL(file);
     
     // Reset file input
     e.target.value = null;
@@ -179,16 +179,19 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
     try {
       const response = await fetch(`/api/images/download?url=${encodeURIComponent(imageUrl)}`);
       if (!response.ok) throw new Error('Failed to download image');
-      const arrayBuffer = await response.arrayBuffer();
-      
-      onSendMessage({
-        type: 'media',
-        fileBuffer: arrayBuffer,
-        fileName: `unsplash_${Date.now()}.jpg`,
-        mimeType: 'image/jpeg',
-        replyTo: replyingTo
-      });
-      setReplyingTo(null);
+      const blob = await response.blob();
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        onSendMessage({
+          type: 'media',
+          fileBuffer: event.target.result,
+          fileName: `unsplash_${Date.now()}.jpg`,
+          mimeType: 'image/jpeg',
+          replyTo: replyingTo
+        });
+        setReplyingTo(null);
+      };
+      reader.readAsDataURL(blob);
     } catch (err) {
       alert('Gagal mengirim gambar: ' + err.message);
     }
@@ -199,29 +202,68 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const resolveMimeType = (fileName, explicitMime) => {
+    if (explicitMime && explicitMime.includes('/')) return explicitMime;
+    if (!fileName) return 'image/jpeg';
+    const ext = fileName.toLowerCase().split('.').pop();
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) return `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+    if (['mp4', 'webm', 'ogg', 'mov', 'mkv', 'avi'].includes(ext)) return `video/${ext === 'mov' ? 'mp4' : ext}`;
+    if (['mp3', 'wav', 'm4a', 'aac'].includes(ext)) return `audio/${ext === 'mp3' ? 'mpeg' : ext}`;
+    return 'application/octet-stream';
+  };
+
+  const resolveMediaUrl = (msg) => {
+    if (msg.mediaUrl && (msg.mediaUrl.startsWith('data:') || msg.mediaUrl.startsWith('http:') || msg.mediaUrl.startsWith('https:') || msg.mediaUrl.startsWith('blob:'))) {
+      return msg.mediaUrl;
+    }
+    if (!msg.fileBuffer) return msg.mediaUrl || null;
+    if (typeof msg.fileBuffer === 'string') {
+      if (msg.fileBuffer.startsWith('data:') || msg.fileBuffer.startsWith('http:') || msg.fileBuffer.startsWith('https:') || msg.fileBuffer.startsWith('blob:')) {
+        return msg.fileBuffer;
+      }
+      const mime = resolveMimeType(msg.fileName, msg.mimeType);
+      return `data:${mime};base64,${msg.fileBuffer}`;
+    }
+    if (typeof msg.fileBuffer === 'object' && msg.fileBuffer.type === 'Buffer' && Array.isArray(msg.fileBuffer.data)) {
+      const uint8 = new Uint8Array(msg.fileBuffer.data);
+      const mime = resolveMimeType(msg.fileName, msg.mimeType);
+      const blob = new Blob([uint8], { type: mime });
+      return URL.createObjectURL(blob);
+    }
+    return msg.mediaUrl || null;
+  };
+
   const renderMessageContent = (msg, isSent, isVip) => {
     if (msg.type === 'media') {
-      if (!msg.mediaUrl && !msg.fileBuffer) return <span>Loading media...</span>;
-      
+      const mime = resolveMimeType(msg.fileName, msg.mimeType);
+      const src = resolveMediaUrl(msg);
+
+      if (!src) return <span style={{fontSize: '13px', fontStyle: 'italic'}}>📷 {msg.fileName || 'Media'}</span>;
+
       let content;
-      if (msg.mimeType?.startsWith('image/')) {
+      if (mime.startsWith('image/')) {
         content = (
           <img 
-            src={msg.mediaUrl || msg.fileBuffer} 
-            alt={msg.fileName} 
-            style={{maxWidth: '100%', maxHeight: '300px', borderRadius: '8px', cursor: 'pointer', transition: 'transform 0.2s'}} 
-            onClick={() => setFullscreenImage(msg.mediaUrl || msg.fileBuffer)}
-            onMouseOver={(e) => e.target.style.transform = 'scale(1.02)'}
-            onMouseOut={(e) => e.target.style.transform = 'scale(1)'}
+            src={src} 
+            alt={msg.fileName || 'Image'} 
+            style={{maxWidth: '100%', maxHeight: '320px', borderRadius: '8px', cursor: 'pointer', display: 'block', objectFit: 'contain'}} 
+            onClick={() => setFullscreenImage(src)}
           />
         );
-      } else if (msg.mimeType?.startsWith('video/')) {
-        content = <video src={msg.mediaUrl || msg.fileBuffer} controls style={{maxWidth: '100%', maxHeight: '300px', borderRadius: '4px', opacity: msg.isUploading ? 0.5 : 1}} />;
-      } else if (msg.mimeType?.startsWith('audio/')) {
-        content = <audio src={msg.mediaUrl || msg.fileBuffer} controls style={{width: '250px', maxWidth: '100%'}} />;
+      } else if (mime.startsWith('video/')) {
+        content = (
+          <video 
+            src={src} 
+            controls 
+            preload="metadata"
+            style={{maxWidth: '100%', maxHeight: '320px', borderRadius: '8px', display: 'block', backgroundColor: '#000'}} 
+          />
+        );
+      } else if (mime.startsWith('audio/')) {
+        content = <audio src={src} controls style={{width: '250px', maxWidth: '100%'}} />;
       } else {
         content = (
-          <a href={msg.mediaUrl || msg.fileBuffer} download={msg.fileName} style={{color: 'var(--primary-color)', textDecoration: 'underline'}}>
+          <a href={src} download={msg.fileName || 'file'} style={{color: 'var(--primary-color)', textDecoration: 'underline'}}>
             {t('download')} {msg.fileName}
           </a>
         );
