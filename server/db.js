@@ -28,63 +28,65 @@ function convertSqlToPg(sql) {
 }
 
 async function initTables() {
-  if (isPg) {
-    const client = await pgPool.connect();
+  if (isPg && pgPool) {
     try {
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS users (
-          id SERIAL PRIMARY KEY,
-          username VARCHAR(255) UNIQUE NOT NULL,
-          passwordHash TEXT NOT NULL,
-          publicKey TEXT,
-          avatar TEXT,
-          lastSeen TEXT,
-          banStatus VARCHAR(50) DEFAULT 'active',
-          banExpiresAt TEXT
-        );
+      const client = await pgPool.connect();
+      try {
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(255) UNIQUE NOT NULL,
+            passwordHash TEXT NOT NULL,
+            publicKey TEXT,
+            avatar TEXT,
+            lastSeen TEXT,
+            banStatus VARCHAR(50) DEFAULT 'active',
+            banExpiresAt TEXT
+          );
 
-        CREATE TABLE IF NOT EXISTS global_messages (
-          messageId VARCHAR(255) PRIMARY KEY,
-          sender VARCHAR(255),
-          message TEXT,
-          type VARCHAR(50),
-          mimeType VARCHAR(100),
-          fileName TEXT,
-          fileBuffer TEXT,
-          replyTo TEXT,
-          timestamp TEXT,
-          reactions TEXT DEFAULT '{}'
-        );
+          CREATE TABLE IF NOT EXISTS global_messages (
+            messageId VARCHAR(255) PRIMARY KEY,
+            sender VARCHAR(255),
+            message TEXT,
+            type VARCHAR(50),
+            mimeType VARCHAR(100),
+            fileName TEXT,
+            fileBuffer TEXT,
+            replyTo TEXT,
+            timestamp TEXT,
+            reactions TEXT DEFAULT '{}'
+          );
 
-        CREATE TABLE IF NOT EXISTS private_messages (
-          id SERIAL PRIMARY KEY,
-          messageId VARCHAR(255) UNIQUE NOT NULL,
-          fromUser VARCHAR(255),
-          toUser VARCHAR(255),
-          encryptedMessage TEXT,
-          timestamp TEXT,
-          delivered INT DEFAULT 0,
-          status VARCHAR(50) DEFAULT 'sent',
-          deliveredAt TEXT,
-          readAt TEXT
-        );
+          CREATE TABLE IF NOT EXISTS private_messages (
+            id SERIAL PRIMARY KEY,
+            messageId VARCHAR(255) UNIQUE NOT NULL,
+            fromUser VARCHAR(255),
+            toUser VARCHAR(255),
+            encryptedMessage TEXT,
+            timestamp TEXT,
+            delivered INT DEFAULT 0,
+            status VARCHAR(50) DEFAULT 'sent',
+            deliveredAt TEXT,
+            readAt TEXT
+          );
 
-        CREATE TABLE IF NOT EXISTS global_message_reads (
-          messageId VARCHAR(255),
-          username VARCHAR(255),
-          PRIMARY KEY (messageId, username)
-        );
+          CREATE TABLE IF NOT EXISTS global_message_reads (
+            messageId VARCHAR(255),
+            username VARCHAR(255),
+            PRIMARY KEY (messageId, username)
+          );
 
-        CREATE INDEX IF NOT EXISTS idx_pm_to_status ON private_messages(toUser, status);
-        CREATE INDEX IF NOT EXISTS idx_pm_conversation ON private_messages(fromUser, toUser, timestamp);
-        CREATE INDEX IF NOT EXISTS idx_gm_timestamp ON global_messages(timestamp);
-        CREATE INDEX IF NOT EXISTS idx_gmr_user ON global_message_reads(username, messageId);
-      `);
-      console.log('[SUPABASE DB] All PostgreSQL tables & indexes verified successfully.');
+          CREATE INDEX IF NOT EXISTS idx_pm_to_status ON private_messages(toUser, status);
+          CREATE INDEX IF NOT EXISTS idx_pm_conversation ON private_messages(fromUser, toUser, timestamp);
+          CREATE INDEX IF NOT EXISTS idx_gm_timestamp ON global_messages(timestamp);
+          CREATE INDEX IF NOT EXISTS idx_gmr_user ON global_message_reads(username, messageId);
+        `);
+        console.log('[POSTGRES DB] Postgres database initialized successfully.');
+      } finally {
+        client.release();
+      }
     } catch (err) {
-      console.error('[SUPABASE DB ERROR] Failed to initialize PostgreSQL tables:', err);
-    } finally {
-      client.release();
+      console.error('[POSTGRES DB ERROR]', err.message);
     }
   } else {
     sqliteDb.serialize(() => {
