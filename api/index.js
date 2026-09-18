@@ -136,7 +136,7 @@ app.post('/login', (req, res) => {
   
   db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
     if (err) {
-      return res.status(500).json({ error: 'Database error' });
+      return res.status(500).json({ error: 'Database error: ' + (err.message || String(err)) });
     }
     if (!user) {
       return res.status(400).json({ error: 'Username belum terdaftar! Silakan klik Buat Akun terlebih dahulu.' });
