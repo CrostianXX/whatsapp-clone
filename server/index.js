@@ -529,10 +529,15 @@ const broadcastUserList = () => {
 };
 
 io.on('connection', (socket) => {
-  console.log(`User connected: ${socket.id}`);
+  const transport = socket.conn.transport.name;
+  const ua = socket.handshake.headers['user-agent'] || 'Unknown UA';
+  const ip = socket.handshake.address || socket.request?.connection?.remoteAddress || '127.0.0.1';
+  console.log(`User connected: ${socket.id} | Transport: ${transport} | IP: ${ip} | UA: ${ua}`);
 
-  // When a user just connects, they might need the list of users before they even log in
-  broadcastUserList();
+  socket.conn.on('upgrade', (transport) => {
+    console.log(`Socket ${socket.id} upgraded to ${transport.name}`);
+  });
+
 
   // Handle user joining (authenticating their socket)
   socket.on('join', (username) => {

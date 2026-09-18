@@ -212,6 +212,8 @@ function App() {
     // IMPORTANT: Load the private key FIRST, then connect the socket.
     // This prevents the race condition where offline messages arrive
     // before privateKeyRef is set, causing silent decryption failures.
+    let isCancelled = false;
+
     const initApp = async () => {
       try {
         const privKeyStr = localStorage.getItem(`privateKey_${currentUser}`);
@@ -226,12 +228,17 @@ function App() {
         setKeyError(true);
       }
 
+      if (isCancelled) return;
+
       // Key is now ready (or failed). Now connect socket.
       const newSocket = io(SOCKET_SERVER_URL, {
-        auth: { token },
-        transports: ['websocket', 'polling']
+        auth: { token }
       });
-      setSocket(newSocket);
+
+      if (isCancelled) {
+        newSocket.close();
+        return;
+      }
       
       newSocket.on('connect', () => {
         newSocket.emit('join', currentUser);
@@ -406,6 +413,7 @@ function App() {
 
         setChats(prev => {
           const globalChat = prev['global'] || [];
+          if (globalChat.find(m => m.id === finalMsgObj.id)) return prev;
           return { ...prev, 'global': [...globalChat, finalMsgObj] };
         });
 
@@ -461,41 +469,38 @@ function App() {
         });
       });
 
-      // update per-message read count for global
+      newSocket.on('clear_global_history', () => {
+        setChats(prev => ({ ...prev, 'global': [] }));
+      });
+
+      newSocket.on('message_deleted', ({ to: chatRoom, messageId }) => {
+        setChats(prev => {
+          const roomChats = prev[chatRoom] || [];
+          return { ...prev, [chatRoom]: roomChats.filter(m => m.id !== messageId) };
+        });
+      });
+
       newSocket.on('global_message_read_update', ({ messageId, readCount, totalUsers }) => {
         setChats(prev => {
-          const globalChat = [...(prev['global'] || [])];
-          const updated = globalChat.map(msg =>
-            msg.id === messageId ? { ...msg, readCount, totalUsers } : msg
-          );
-          return { ...prev, 'global': updated };
+          const globalChat = prev['global'] || [];
+          const updatedChat = globalChat.map(msg => {
+            if (msg.id === messageId) {
+              return { ...msg, readCount, totalUsers };
+            }
+            return msg;
+          });
+          return { ...prev, 'global': updatedChat };
         });
       });
 
-      newSocket.on('message_deleted', ({ to, messageId }) => {
+      newSocket.on('message_reaction', ({ to: room, messageId, emoji, from, reactions: serverReactions }) => {
         setChats(prev => {
-          const room = to;
           const roomChats = prev[room] || [];
-          return { ...prev, [room]: roomChats.filter(m => m.id !== messageId) };
-        });
-      });
-
-      newSocket.on('clear_global_history', () => {
-        setChats(prev => ({
-          ...prev,
-          'global': []
-        }));
-      });
-
-      newSocket.on('message_reaction', ({ to, messageId, emoji, from, reactions }) => {
-        setChats(prev => {
-          const room = to === 'global' ? 'global' : (from === currentUser ? to : from);
-          const roomChats = [...(prev[room] || [])];
           const updatedChat = roomChats.map(msg => {
             if (msg.id === messageId) {
               let newReactions = { ...(msg.reactions || {}) };
-              if (to === 'global' && reactions) {
-                 newReactions = reactions;
+              if (serverReactions) {
+                newReactions = serverReactions;
               } else {
                  if (newReactions[from] === emoji) delete newReactions[from];
                  else newReactions[from] = emoji;
@@ -509,14 +514,18 @@ function App() {
       });
 
       setSocket(newSocket);
-      return newSocket;
     };
 
-    let socketRef = null;
-    initApp().then(sock => { socketRef = sock; });
+    initApp();
 
     return () => {
-      if (socketRef) socketRef.close();
+      isCancelled = true;
+      setSocket(prevSocket => {
+        if (prevSocket) {
+          prevSocket.close();
+        }
+        return null;
+      });
     };
   }, [currentUser]);
 
