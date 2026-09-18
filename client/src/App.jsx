@@ -230,6 +230,7 @@ function App() {
       const newSocket = io(SOCKET_SERVER_URL, {
         auth: { token }
       });
+      setSocket(newSocket);
       
       newSocket.on('connect', () => {
         newSocket.emit('join', currentUser);
@@ -266,6 +267,12 @@ function App() {
         };
         
         try {
+          if (!privateKeyRef.current) {
+            const privKeyStr = localStorage.getItem(`privateKey_${currentUser}`);
+            if (privKeyStr) {
+              privateKeyRef.current = await importPrivateKey(privKeyStr);
+            }
+          }
           if (!privateKeyRef.current) throw new Error("No private key");
           
           // Try parsing as JSON first (Media Hybrid Encryption)

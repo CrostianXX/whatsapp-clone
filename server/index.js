@@ -607,9 +607,12 @@ io.on('connection', (socket) => {
                   timestamp: pm.timestamp
                 });
               });
-              // Mark all as delivered
-              const ids = pendingMsgs.map(pm => `'${pm.messageId}'`).join(',');
-              db.run(`UPDATE private_messages SET delivered = 1 WHERE messageId IN (${ids})`);
+              // Mark all as delivered safely
+              const ids = pendingMsgs.map(pm => pm.messageId);
+              if (ids.length > 0) {
+                const placeholders = ids.map(() => '?').join(',');
+                db.run(`UPDATE private_messages SET delivered = 1 WHERE messageId IN (${placeholders})`, ids);
+              }
             }
           }
         );
