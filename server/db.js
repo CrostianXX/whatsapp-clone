@@ -1,5 +1,4 @@
 const { Pool } = require('pg');
-const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
 let isPg = false;
@@ -17,6 +16,7 @@ if (databaseUrl) {
   });
 } else {
   console.log('[DATABASE] DATABASE_URL not set. Falling back to SQLite database...');
+  const sqlite3 = require('sqlite3').verbose();
   const dbPath = process.env.DB_PATH || path.join(__dirname, 'database.sqlite');
   sqliteDb = new sqlite3.Database(dbPath);
 }
