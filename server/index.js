@@ -35,14 +35,16 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   maxHttpBufferSize: 5e7, // 50 MB
-  pingTimeout: 60000,
-  pingInterval: 25000,
+  pingTimeout: 30000,
+  pingInterval: 10000,
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
   },
-  transports: ['websocket', 'polling']
+  transports: ['websocket', 'polling'],
+  allowUpgrades: true
 });
+
 
 const JWT_SECRET = 'super-secret-whatsapp-key-123'; // In production, use environment variable
 
@@ -508,40 +510,36 @@ app.post('/api/update-avatar', (req, res) => {
 const activeUsers = new Map();
 
 // Helper to broadcast active users (only usernames, public keys, and avatars)
+// Debounced to prevent flooding when many sockets connect/disconnect rapidly
+let broadcastTimer = null;
 const broadcastUserList = () => {
-  db.all("SELECT username, publicKey, avatar, lastSeen FROM users", (err, rows) => {
-    if (err) {
-      console.error("broadcastUserList Error:", err);
-      return;
-    }
-    
-    const allUsers = rows.map(row => {
-      const room = io.sockets.adapter.rooms.get(row.username);
-      const isOnline = (room && room.size > 0) || activeUsers.has(row.username);
-      return {
-        username: row.username,
-        publicKey: row.publicKey,
-        avatar: row.avatar,
-        lastSeen: row.lastSeen,
-        status: isOnline ? 'online' : 'offline'
-      };
+  if (broadcastTimer) clearTimeout(broadcastTimer);
+  broadcastTimer = setTimeout(() => {
+    db.all("SELECT username, publicKey, avatar, lastSeen FROM users", (err, rows) => {
+      if (err) {
+        console.error("broadcastUserList Error:", err);
+        return;
+      }
+      
+      const allUsers = rows.map(row => {
+        const room = io.sockets.adapter.rooms.get(row.username);
+        const isOnline = (room && room.size > 0) || activeUsers.has(row.username);
+        return {
+          username: row.username,
+          publicKey: row.publicKey,
+          avatar: row.avatar,
+          lastSeen: row.lastSeen,
+          status: isOnline ? 'online' : 'offline'
+        };
+      });
+      
+      io.emit('users_list', allUsers);
     });
-    
-    console.log("Broadcasting users_list with count:", allUsers.length);
-    io.emit('users_list', allUsers);
-  });
+  }, 300); // 300ms debounce
 };
 
 
 io.on('connection', (socket) => {
-  const transport = socket.conn.transport.name;
-  const ua = socket.handshake.headers['user-agent'] || 'Unknown UA';
-  const ip = socket.handshake.address || socket.request?.connection?.remoteAddress || '127.0.0.1';
-  console.log(`User connected: ${socket.id} | Transport: ${transport} | IP: ${ip} | UA: ${ua}`);
-
-  socket.conn.on('upgrade', (transport) => {
-    console.log(`Socket ${socket.id} upgraded to ${transport.name}`);
-  });
 
 
   // Handle user joining (authenticating their socket)
@@ -735,8 +733,8 @@ io.on('connection', (socket) => {
     const finalMessageId = messageId || (Date.now().toString() + Math.random());
     const now = new Date().toISOString();
     
-    // 1. Broadcast INSTANTLY (0ms latency) to all connected clients
-    io.emit('public_message', {
+    // 1. Broadcast to ALL OTHER clients (sender already has optimistic local copy)
+    socket.broadcast.emit('public_message', {
       from, 
       message, 
       type: type || 'text', 

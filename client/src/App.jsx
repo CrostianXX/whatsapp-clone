@@ -230,12 +230,16 @@ function App() {
 
       if (isCancelled) return;
 
-      // Key is now ready (or failed). Now connect socket using WebSocket transport directly.
+      // Key is now ready (or failed). Now connect socket.
       const newSocket = io(SOCKET_SERVER_URL, {
         auth: { token },
-        transports: ['websocket', 'polling']
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        timeout: 20000
       });
-
 
       if (isCancelled) {
         newSocket.close();
@@ -243,7 +247,12 @@ function App() {
       }
       
       newSocket.on('connect', () => {
-        console.log("Socket connected successfully with ID:", newSocket.id);
+        console.log("Socket connected with ID:", newSocket.id);
+        newSocket.emit('join', currentUser);
+      });
+
+      newSocket.on('reconnect', (attemptNumber) => {
+        console.log(`Socket reconnected after ${attemptNumber} attempts`);
         newSocket.emit('join', currentUser);
       });
 
@@ -607,17 +616,45 @@ function App() {
     
     try {
       if (selectedUser.username === 'global') {
+        const globalMsgId = Date.now().toString() + Math.random();
         const publicPayload = {
           from: currentUser,
           message: payload.text,
           type: payload.type,
           mimeType: payload.mimeType,
           fileName: payload.fileName,
-          replyTo: payload.replyTo
+          replyTo: payload.replyTo,
+          messageId: globalMsgId
         };
         if (payload.type === 'media') {
            publicPayload.fileBuffer = payload.fileBuffer;
         }
+
+        // Optimistic local insert - show message immediately on sender's screen
+        const localGlobalMsg = {
+          id: globalMsgId,
+          sender: currentUser,
+          timestamp: new Date().toISOString(),
+          type: payload.type,
+          replyTo: payload.replyTo,
+          readCount: 0,
+          totalUsers: 0
+        };
+        if (payload.type === 'text') {
+          localGlobalMsg.text = payload.text;
+        } else if (payload.type === 'media') {
+          const blob = new Blob([payload.fileBuffer], { type: payload.mimeType });
+          localGlobalMsg.fileName = payload.fileName;
+          localGlobalMsg.mimeType = payload.mimeType;
+          localGlobalMsg.blob = blob;
+          localGlobalMsg.mediaUrl = URL.createObjectURL(blob);
+        }
+        setChats(prev => {
+          const globalChat = prev['global'] || [];
+          if (globalChat.find(m => m.id === globalMsgId)) return prev;
+          return { ...prev, 'global': [...globalChat, localGlobalMsg] };
+        });
+
         socket.emit('public_message', publicPayload);
         return;
       }
