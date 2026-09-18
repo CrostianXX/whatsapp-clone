@@ -108,6 +108,8 @@ function convertSqlToPg(sql) {
   let pgSql = sql.replace(/\?/g, () => `$${index++}`);
   // Replace double quoted string literals like "sent" or "active" with single quotes for PG compatibility
   pgSql = pgSql.replace(/"(sent|active|permanently_banned|temp_banned|delivered|read)"/g, "'$1'");
+  // Convert camelCase SQL column names to lowercase for PG compatibility
+  pgSql = pgSql.replace(/\b(passwordHash|publicKey|lastSeen|banStatus|banExpiresAt|messageId|fromUser|toUser|encryptedMessage|mimeType|fileName|fileBuffer|replyTo|deliveredAt|readAt)\b/g, (match) => match.toLowerCase());
   return pgSql;
 }
 
@@ -125,14 +127,9 @@ const db = {
         const res = await pool.query(pgSql, params);
         return callback(null, res.rows[0] || null);
       } catch (err) {
-        console.warn('[DB GET PG FALLBACK TO MEMORY]', err.message);
+        console.error('[SUPABASE PG GET ERROR]', err.message, '| SQL:', pgSql);
+        return callback(err, null);
       }
-    }
-
-    // High-Availability Fallback to Memory Store
-    if (sql.includes('FROM users WHERE username = ?')) {
-      const u = memoryUsers.get(params[0]);
-      return callback(null, u || null);
     }
     return callback(null, null);
   },
@@ -150,13 +147,9 @@ const db = {
         const res = await pool.query(pgSql, params);
         return callback(null, res.rows || []);
       } catch (err) {
-        console.warn('[DB ALL PG FALLBACK TO MEMORY]', err.message);
+        console.error('[SUPABASE PG ALL ERROR]', err.message, '| SQL:', pgSql);
+        return callback(err, []);
       }
-    }
-
-    // High-Availability Fallback to Memory Store
-    if (sql.includes('FROM users')) {
-      return callback(null, Array.from(memoryUsers.values()));
     }
     return callback(null, []);
   },
@@ -179,38 +172,12 @@ const db = {
         if (callback) callback.call(context, null);
         return;
       } catch (err) {
-        console.warn('[DB RUN PG FALLBACK TO MEMORY]', err.message);
+        console.error('[SUPABASE PG RUN ERROR]', err.message, '| SQL:', pgSql);
+        if (callback) callback(err);
+        return;
       }
     }
-
-    // High-Availability Fallback to Memory Store
-    if (sql.includes('INSERT INTO users')) {
-      const [username, passwordHash, publicKey] = params;
-      const newUser = { id: memoryUsers.size + 1, username, passwordHash, publicKey, avatar: null, lastSeen: new Date().toISOString(), banStatus: 'active', banExpiresAt: null };
-      memoryUsers.set(username, newUser);
-      const context = { lastID: newUser.id, changes: 1 };
-      if (callback) callback.call(context, null);
-    } else if (sql.includes('UPDATE users')) {
-      if (sql.includes('publicKey =') && sql.includes('WHERE username =')) {
-        const u = params[params.length - 1];
-        const mem = memoryUsers.get(u);
-        if (mem) {
-          if (sql.includes('avatar =')) mem.avatar = params[0];
-          mem.publicKey = params[1] || params[0];
-        }
-      } else if (sql.includes('avatar =') && sql.includes('WHERE username =')) {
-        const u = params[1];
-        const mem = memoryUsers.get(u);
-        if (mem) mem.avatar = params[0];
-      } else if (sql.includes('passwordHash =') && sql.includes('WHERE username =')) {
-        const u = params[1];
-        const mem = memoryUsers.get(u);
-        if (mem) mem.passwordHash = params[0];
-      }
-      if (callback) callback.call({ changes: 1 }, null);
-    } else {
-      if (callback) callback(null);
-    }
+    if (callback) callback(null);
   }
 };
 

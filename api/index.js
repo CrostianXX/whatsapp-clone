@@ -218,7 +218,17 @@ app.get('/api/messages/private/sync', authenticateUser, (req, res) => {
     if (err) {
       return res.status(500).json({ error: 'Database error' });
     }
-    res.json(rows || []);
+    const formatted = (rows || []).map(r => ({
+      id: r.id,
+      messageId: r.messageId || r.messageid,
+      fromUser: r.fromUser || r.fromuser,
+      toUser: r.toUser || r.touser,
+      encryptedMessage: r.encryptedMessage || r.encryptedmessage,
+      timestamp: r.timestamp,
+      delivered: r.delivered,
+      status: r.status
+    }));
+    res.json(formatted);
   });
 });
 
