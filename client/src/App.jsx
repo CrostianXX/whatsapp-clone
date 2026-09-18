@@ -235,6 +235,7 @@ const GLOBAL_ROOM = {
 
   useEffect(() => {
     if (currentUser) {
+      setChatsLoaded(false);
       localforage.getItem(`chats_${currentUser}`).then((savedChats) => {
         if (savedChats) {
           const hydratedChats = {};
@@ -256,9 +257,10 @@ const GLOBAL_ROOM = {
           setChats(hydratedChats);
         }
         setChatsLoaded(true);
-      });
+      }).catch(() => setChatsLoaded(true));
     }
   }, [currentUser]);
+
 
   useEffect(() => {
     if (currentUser && chatsLoaded) {
