@@ -238,6 +238,164 @@ const GLOBAL_ROOM = {
 
       if (isCancelled) return;
 
+      // Synchronization Engine: Sync unread counts, private messages, and global history from DB
+      const syncAllMessages = async () => {
+        if (!currentUser || !token) return;
+        try {
+          // 1. Fetch server unread counts
+          const unreadRes = await fetch('/api/messages/unread-counts', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (unreadRes.ok) {
+            const counts = await unreadRes.json();
+            setUnreadCounts(counts || {});
+          }
+
+          // 2. Fetch private message sync
+          const pSyncRes = await fetch('/api/messages/private/sync', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (pSyncRes.ok) {
+            const privateRows = await pSyncRes.json();
+            if (privateRows && privateRows.length > 0) {
+              const decryptedPrivateMsgs = {};
+              for (const pm of privateRows) {
+                const peer = pm.fromUser === currentUser ? pm.toUser : pm.fromUser;
+                if (!decryptedPrivateMsgs[peer]) decryptedPrivateMsgs[peer] = [];
+
+                let finalMsgObj = {
+                  id: pm.messageId,
+                  sender: pm.fromUser,
+                  timestamp: pm.timestamp,
+                  status: pm.status || 'sent'
+                };
+
+                if (pm.toUser === currentUser) {
+                  try {
+                    if (!privateKeyRef.current) {
+                      const privKeyStr = localStorage.getItem(`privateKey_${currentUser}`);
+                      if (privKeyStr) privateKeyRef.current = await importPrivateKey(privKeyStr);
+                    }
+                    if (privateKeyRef.current) {
+                      let parsedPayload;
+                      try { parsedPayload = JSON.parse(pm.encryptedMessage); } catch (e) {}
+
+                      if (parsedPayload && parsedPayload.type === 'media') {
+                        const aesKey = await decryptAESKeyWithRSA(privateKeyRef.current, parsedPayload.encryptedAesKey);
+                        const decryptedBuffer = await decryptMedia(aesKey, parsedPayload.encryptedContent);
+                        const blob = new Blob([decryptedBuffer], { type: parsedPayload.mimeType });
+                        finalMsgObj = {
+                          ...finalMsgObj,
+                          type: 'media',
+                          fileName: parsedPayload.fileName,
+                          mimeType: parsedPayload.mimeType,
+                          blob: blob,
+                          mediaUrl: URL.createObjectURL(blob),
+                          replyTo: parsedPayload.replyTo
+                        };
+                      } else {
+                        const decryptedText = await decryptMessage(privateKeyRef.current, pm.encryptedMessage);
+                        let parsedTextObj = null;
+                        try { parsedTextObj = JSON.parse(decryptedText); } catch(e) {}
+                        if (parsedTextObj && parsedTextObj.text) {
+                          finalMsgObj = { ...finalMsgObj, type: 'text', text: parsedTextObj.text, replyTo: parsedTextObj.replyTo };
+                        } else {
+                          finalMsgObj = { ...finalMsgObj, type: 'text', text: decryptedText };
+                        }
+                      }
+                    }
+                  } catch (decErr) {
+                    console.error("[SYNC DECRYPT ERROR]", pm.messageId, decErr.message);
+                    finalMsgObj = { ...finalMsgObj, type: 'text', text: "[Encrypted Message]" };
+                  }
+                } else {
+                  finalMsgObj.type = 'text';
+                  finalMsgObj.text = '[Sent Message]';
+                }
+
+                decryptedPrivateMsgs[peer].push(finalMsgObj);
+              }
+
+              setChats(prev => {
+                const updated = { ...prev };
+                for (const peer in decryptedPrivateMsgs) {
+                  const existingPeerChats = updated[peer] || [];
+                  const map = new Map();
+                  existingPeerChats.forEach(m => map.set(m.id, m));
+                  decryptedPrivateMsgs[peer].forEach(m => {
+                    const existing = map.get(m.id);
+                    if (existing) {
+                      map.set(m.id, {
+                        ...m,
+                        ...existing,
+                        status: m.status || existing.status
+                      });
+                    } else {
+                      map.set(m.id, m);
+                    }
+                  });
+                  const sorted = Array.from(map.values()).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                  updated[peer] = sorted;
+                }
+                return updated;
+              });
+            }
+          }
+
+          // 3. Fetch global message sync
+          const gSyncRes = await fetch('/api/messages/global/sync', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (gSyncRes.ok) {
+            const globalRows = await gSyncRes.json();
+            if (globalRows && globalRows.length > 0) {
+              setChats(prev => {
+                const globalChat = prev['global'] || [];
+                const map = new Map();
+                globalChat.forEach(m => map.set(m.id, m));
+
+                globalRows.forEach(data => {
+                  const { from, message, type, mimeType, fileName, fileBuffer, timestamp, messageId, replyTo, reactions } = data;
+                  const existing = map.get(messageId);
+                  let finalMsgObj = {
+                    id: messageId,
+                    sender: from,
+                    timestamp: timestamp,
+                    type: type,
+                    replyTo: replyTo,
+                    reactions: reactions || {}
+                  };
+
+                  if (type === 'text') {
+                    finalMsgObj.text = message;
+                  } else if (type === 'media' && fileBuffer) {
+                    const blob = new Blob([fileBuffer], { type: mimeType });
+                    finalMsgObj.fileName = fileName;
+                    finalMsgObj.mimeType = mimeType;
+                    finalMsgObj.blob = blob;
+                    finalMsgObj.mediaUrl = URL.createObjectURL(blob);
+                  }
+
+                  if (existing) {
+                    map.set(messageId, { ...existing, ...finalMsgObj });
+                  } else {
+                    map.set(messageId, finalMsgObj);
+                  }
+                });
+
+                const sorted = Array.from(map.values()).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                return { ...prev, 'global': sorted };
+              });
+            }
+          }
+        } catch (err) {
+          console.error("[SYNC ERROR]", err);
+        }
+      };
+
+      // Perform immediate REST sync
+      syncAllMessages();
+
       // Key is now ready (or failed). Now connect socket.
       const newSocket = io(SOCKET_SERVER_URL, {
         auth: { token },
@@ -270,15 +428,18 @@ const GLOBAL_ROOM = {
       newSocket.on('connect', () => {
         console.log("Socket connected with ID:", newSocket.id);
         newSocket.emit('join', currentUser);
+        syncAllMessages();
       });
 
       if (newSocket.connected) {
         newSocket.emit('join', currentUser);
+        syncAllMessages();
       }
 
       newSocket.on('reconnect', (attemptNumber) => {
         console.log(`Socket reconnected after ${attemptNumber} attempts`);
         newSocket.emit('join', currentUser);
+        syncAllMessages();
       });
 
 
@@ -572,6 +733,18 @@ const GLOBAL_ROOM = {
     setSelectedUser(user);
     setUnreadCounts(prev => ({ ...prev, [user.username]: 0 }));
     if (isMobile) setMobileShowChat(true);
+
+    // Call REST endpoint to mark messages as read on backend DB
+    if (token) {
+      fetch('/api/messages/read', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ room: user.username })
+      }).catch(err => console.error("Error marking read:", err));
+    }
 
     // For global chat: emit read for all messages
     if (user.username === 'global' && socket) {

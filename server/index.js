@@ -96,25 +96,22 @@ const db = new sqlite3.Database(dbPath, (err) => {
         PRIMARY KEY (messageId, username)
       )`);
       
-      db.run(`ALTER TABLE users ADD COLUMN avatar TEXT`, (err) => {
-        // Ignore if already exists
-      });
+      db.run(`ALTER TABLE users ADD COLUMN avatar TEXT`, (err) => {});
+      db.run(`ALTER TABLE users ADD COLUMN lastSeen TEXT`, (err) => {});
+      db.run(`ALTER TABLE users ADD COLUMN banStatus TEXT DEFAULT 'active'`, (err) => {});
+      db.run(`ALTER TABLE users ADD COLUMN banExpiresAt TEXT`, (err) => {});
+      db.run(`ALTER TABLE global_messages ADD COLUMN reactions TEXT DEFAULT '{}'`, (err) => {});
 
-      db.run(`ALTER TABLE users ADD COLUMN lastSeen TEXT`, (err) => {
-        // Ignore if already exists
-      });
+      // Add status, deliveredAt, readAt columns to private_messages
+      db.run(`ALTER TABLE private_messages ADD COLUMN status TEXT DEFAULT 'sent'`, (err) => {});
+      db.run(`ALTER TABLE private_messages ADD COLUMN deliveredAt TEXT`, (err) => {});
+      db.run(`ALTER TABLE private_messages ADD COLUMN readAt TEXT`, (err) => {});
 
-      db.run(`ALTER TABLE users ADD COLUMN banStatus TEXT DEFAULT 'active'`, (err) => {
-        // Ignore if already exists
-      });
-
-      db.run(`ALTER TABLE users ADD COLUMN banExpiresAt TEXT`, (err) => {
-        // Ignore if already exists
-      });
-
-      db.run(`ALTER TABLE global_messages ADD COLUMN reactions TEXT DEFAULT '{}'`, (err) => {
-        // Ignore if already exists
-      });
+      // Create indexes for efficient querying and sync
+      db.run(`CREATE INDEX IF NOT EXISTS idx_pm_to_status ON private_messages(toUser, status)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_pm_conversation ON private_messages(fromUser, toUser, timestamp)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_gm_timestamp ON global_messages(timestamp)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_gmr_user ON global_message_reads(username, messageId)`);
     });
   }
 });
@@ -237,6 +234,212 @@ app.post('/login', (req, res) => {
     const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET);
     res.json({ token, username: user.username, userId: user.id });
   });
+});
+
+// User Authentication Middleware (Requires valid JWT token)
+const authenticateUser = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Unauthorized. Token required.' });
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded; // { userId, username }
+    next();
+  } catch (error) {
+    res.status(401).json({ error: 'Token tidak valid atau kadaluarsa' });
+  }
+};
+
+// Sync Private Messages for Authenticated User
+app.get('/api/messages/private/sync', authenticateUser, (req, res) => {
+  const username = req.user.username;
+  const since = req.query.since;
+  const peer = req.query.peer;
+
+  let query = 'SELECT * FROM private_messages WHERE (fromUser = ? OR toUser = ?)';
+  let params = [username, username];
+
+  if (peer) {
+    query += ' AND (fromUser = ? OR toUser = ?)';
+    params.push(peer, peer);
+  }
+
+  if (since) {
+    query += ' AND timestamp > ?';
+    params.push(since);
+  }
+
+  query += ' ORDER BY timestamp ASC LIMIT 500';
+
+  db.all(query, params, (err, rows) => {
+    if (err) {
+      console.error("[DB ERROR] Sync private messages:", err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+    res.json(rows || []);
+  });
+});
+
+// Sync Global Messages
+app.get('/api/messages/global/sync', authenticateUser, (req, res) => {
+  const since = req.query.since;
+  const limit = parseInt(req.query.limit) || 100;
+
+  let query = 'SELECT * FROM global_messages';
+  let params = [];
+
+  if (since) {
+    query += ' WHERE timestamp > ? ORDER BY timestamp ASC LIMIT ?';
+    params.push(since, limit);
+  } else {
+    query += ' ORDER BY timestamp ASC LIMIT ?';
+    params.push(limit);
+  }
+
+  db.all(query, params, (err, rows) => {
+    if (err) {
+      console.error("[DB ERROR] Sync global messages:", err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+    const history = (rows || []).map(row => {
+      try {
+        return {
+          messageId: row.messageId,
+          from: row.sender,
+          message: row.message,
+          type: row.type,
+          mimeType: row.mimeType,
+          fileName: row.fileName,
+          fileBuffer: row.type === 'media' ? row.fileBuffer : null,
+          replyTo: row.replyTo ? JSON.parse(row.replyTo) : null,
+          timestamp: row.timestamp,
+          reactions: row.reactions ? JSON.parse(row.reactions) : {}
+        };
+      } catch (e) {
+        return {
+          messageId: row.messageId,
+          from: row.sender,
+          message: row.message,
+          type: row.type || 'text',
+          timestamp: row.timestamp,
+          reactions: {}
+        };
+      }
+    });
+    res.json(history);
+  });
+});
+
+// Get Unread Message Counts per Chat for Authenticated User
+app.get('/api/messages/unread-counts', authenticateUser, (req, res) => {
+  const username = req.user.username;
+  const unreadMap = {};
+
+  // Private Unread Counts (where toUser = username and status != 'read')
+  db.all(
+    'SELECT fromUser, COUNT(*) as count FROM private_messages WHERE toUser = ? AND status != "read" GROUP BY fromUser',
+    [username],
+    (err, privateRows) => {
+      if (!err && privateRows) {
+        privateRows.forEach(row => {
+          unreadMap[row.fromUser] = row.count;
+        });
+      }
+
+      // Global Unread Count (global messages not sent by me and not in global_message_reads)
+      db.get(
+        'SELECT COUNT(*) as count FROM global_messages WHERE sender != ? AND messageId NOT IN (SELECT messageId FROM global_message_reads WHERE username = ?)',
+        [username, username],
+        (err2, globalRow) => {
+          if (!err2 && globalRow) {
+            unreadMap['global'] = globalRow.count || 0;
+          } else {
+            unreadMap['global'] = 0;
+          }
+          res.json(unreadMap);
+        }
+      );
+    }
+  );
+});
+
+// Mark Room Messages as Read
+app.post('/api/messages/read', authenticateUser, (req, res) => {
+  const username = req.user.username;
+  const { room, messageIds } = req.body;
+
+  if (!room) return res.status(400).json({ error: 'Room required' });
+
+  const now = new Date().toISOString();
+
+  if (room === 'global') {
+    if (messageIds && Array.isArray(messageIds) && messageIds.length > 0) {
+      const stmt = db.prepare('INSERT OR IGNORE INTO global_message_reads (messageId, username) VALUES (?, ?)');
+      messageIds.forEach(id => stmt.run(id, username));
+      stmt.finalize(() => {
+        res.json({ success: true });
+      });
+    } else {
+      db.all('SELECT messageId FROM global_messages', (err, rows) => {
+        if (!err && rows && rows.length > 0) {
+          const stmt = db.prepare('INSERT OR IGNORE INTO global_message_reads (messageId, username) VALUES (?, ?)');
+          rows.forEach(r => stmt.run(r.messageId, username));
+          stmt.finalize();
+        }
+        res.json({ success: true });
+      });
+    }
+  } else {
+    // Mark private chat messages as read
+    db.run(
+      'UPDATE private_messages SET status = "read", readAt = ? WHERE toUser = ? AND fromUser = ? AND status != "read"',
+      [now, username, room],
+      function(err) {
+        if (err) return res.status(500).json({ error: 'Database error' });
+
+        // Notify sender via Socket.IO
+        io.to(room).emit('message_status_update', {
+          from: username,
+          to: room,
+          status: 'read'
+        });
+
+        res.json({ success: true, updatedCount: this.changes });
+      }
+    );
+  }
+});
+
+// REST Fallback for Sending Private Message
+app.post('/api/messages/private/send', authenticateUser, (req, res) => {
+  const from = req.user.username;
+  const { to, encryptedMessage, messageId } = req.body;
+
+  if (!to || !encryptedMessage) return res.status(400).json({ error: 'Recipient and encrypted message required' });
+
+  const finalMessageId = messageId || (Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9));
+  const now = new Date().toISOString();
+  const recipientRoom = io.sockets.adapter.rooms.get(to);
+  const isOnline = recipientRoom && recipientRoom.size > 0;
+  const initialStatus = isOnline ? 'delivered' : 'sent';
+
+  db.run(
+    'INSERT OR IGNORE INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered, status, deliveredAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [finalMessageId, from, to, encryptedMessage, now, isOnline ? 1 : 0, initialStatus, isOnline ? now : null],
+    function(err) {
+      if (err) return res.status(500).json({ error: 'Failed to save message to database' });
+
+      // Relay to online sockets of recipient
+      io.to(to).emit('private_message', {
+        from,
+        encryptedMessage,
+        messageId: finalMessageId,
+        timestamp: now,
+        status: initialStatus
+      });
+
+      res.json({ success: true, messageId: finalMessageId, timestamp: now, status: initialStatus });
+    }
+  );
 });
 
 // Admin Middleware (Requires JWT Token + Secret Admin PIN Header)
@@ -697,31 +900,46 @@ io.on('connection', (socket) => {
   socket.on('private_message', (data) => {
     const { to, encryptedMessage, from, messageId } = data;
     const now = new Date().toISOString();
-    const finalMessageId = messageId || (Date.now().toString() + Math.random());
+    const finalMessageId = messageId || (Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9));
 
     const recipientRoom = io.sockets.adapter.rooms.get(to);
     const isOnline = recipientRoom && recipientRoom.size > 0;
+    const initialStatus = isOnline ? 'delivered' : 'sent';
 
-    // Store in DB with delivered status
+    // Store in DB with status
     db.run(
-      'INSERT OR IGNORE INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered) VALUES (?, ?, ?, ?, ?, ?)',
-      [finalMessageId, from, to, encryptedMessage, now, isOnline ? 1 : 0]
+      'INSERT OR IGNORE INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered, status, deliveredAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [finalMessageId, from, to, encryptedMessage, now, isOnline ? 1 : 0, initialStatus, isOnline ? now : null],
+      (err) => {
+        if (err) console.error("[DB ERROR] Save private message:", err);
+      }
     );
 
     // Relay IMMEDIATELY to room `to` (delivers to all active sockets of user `to`)
-    console.log(`Relaying E2EE message from ${from} to room ${to} (online sockets: ${recipientRoom ? recipientRoom.size : 0}).`);
+    console.log(`Relaying E2EE message ${finalMessageId} from ${from} to room ${to} (online: ${isOnline}).`);
     io.to(to).emit('private_message', {
       from: from,
+      to: to,
       encryptedMessage: encryptedMessage,
       messageId: finalMessageId,
-      timestamp: now
+      timestamp: now,
+      status: initialStatus
+    });
+
+    // Notify sender of status update
+    socket.emit('message_status_update', {
+      messageId: finalMessageId,
+      status: initialStatus,
+      from: to,
+      to: from
     });
   });
 
   // Handle ACK when recipient actually receives private message
   socket.on('message_received_ack', ({ messageId, from }) => {
     if (!messageId) return;
-    db.run('UPDATE private_messages SET delivered = 1 WHERE messageId = ?', [messageId]);
+    const now = new Date().toISOString();
+    db.run('UPDATE private_messages SET delivered = 1, status = "delivered", deliveredAt = ? WHERE messageId = ? AND status = "sent"', [now, messageId]);
     
     if (from) {
       io.to(from).emit('message_status_update', {
@@ -739,10 +957,21 @@ io.on('connection', (socket) => {
 
   socket.on('message_status_update', (data) => {
     const { to, messageId, status, from } = data;
+    const now = new Date().toISOString();
+
+    if (messageId && status) {
+      if (status === 'read') {
+        db.run('UPDATE private_messages SET status = "read", readAt = ? WHERE messageId = ?', [now, messageId]);
+      } else if (status === 'delivered') {
+        db.run('UPDATE private_messages SET status = "delivered", deliveredAt = ? WHERE messageId = ? AND status = "sent"', [now, messageId]);
+      }
+    }
+
     io.to(to).emit('message_status_update', {
       messageId,
       status,
-      from
+      from,
+      to
     });
   });
 
