@@ -218,6 +218,7 @@ const db = {
   }
 };
 
-initTables();
+initTables().catch(err => console.error('[DB INIT ERROR]', err));
 
 module.exports = db;
+

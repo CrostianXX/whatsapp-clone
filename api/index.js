@@ -1,10 +1,19 @@
 const path = require('path');
+
+let app;
 try {
-  const app = require(path.join(process.cwd(), 'server', 'index.js'));
-  module.exports = app;
-} catch (err) {
-  console.error('[VERCEL API ERROR]', err);
-  module.exports = (req, res) => {
-    res.status(500).json({ error: 'Server initialization error', details: err.message, stack: err.stack });
-  };
+  app = require('../server/index.js');
+} catch (e1) {
+  try {
+    app = require(path.join(process.cwd(), 'server', 'index.js'));
+  } catch (e2) {
+    console.error('[API ENTRY FAILURE]', e1, e2);
+  }
 }
+
+module.exports = (req, res) => {
+  if (app) {
+    return app(req, res);
+  }
+  res.status(500).json({ error: 'Failed to load backend server' });
+};
