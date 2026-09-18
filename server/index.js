@@ -533,11 +533,38 @@ io.on('connection', (socket) => {
 
   // Handle user joining (authenticating their socket)
   socket.on('join', (username) => {
+    if (!username) return;
+
+    const clientIp = socket.handshake.address || socket.request?.connection?.remoteAddress || '127.0.0.1';
+    const userAgent = socket.handshake.headers['user-agent'] || 'Browser';
+
+    // Register active user IMMEDIATELY (0ms sync) so private messages route without waiting for DB
+    activeUsers.set(username, {
+      socketId: socket.id,
+      username: username,
+      status: 'online',
+      ip: clientIp,
+      userAgent: userAgent,
+      connectedAt: new Date().toISOString()
+    });
+
+    activeSessions.set(socket.id, {
+      socketId: socket.id,
+      username: username,
+      ip: clientIp,
+      userAgent: userAgent,
+      connectedAt: new Date().toISOString()
+    });
+
+    broadcastUserList();
+
     db.get('SELECT id, username, publicKey, banStatus, banExpiresAt FROM users WHERE username = ?', [username], (err, user) => {
       if (user) {
         if (user.banStatus === 'permanently_banned') {
           socket.emit('force_disconnect', { message: 'Your account has been permanently banned.' });
           socket.disconnect(true);
+          activeUsers.delete(username);
+          activeSessions.delete(socket.id);
           return;
         }
         
@@ -545,34 +572,19 @@ io.on('connection', (socket) => {
           if (new Date() < new Date(user.banExpiresAt)) {
             socket.emit('force_disconnect', { message: `Your account is temporarily banned until ${new Date(user.banExpiresAt).toLocaleString()}` });
             socket.disconnect(true);
+            activeUsers.delete(username);
+            activeSessions.delete(socket.id);
             return;
           } else {
             db.run('UPDATE users SET banStatus = "active", banExpiresAt = NULL WHERE id = ?', [user.id]);
           }
         }
 
-        const clientIp = socket.handshake.address || socket.request?.connection?.remoteAddress || '127.0.0.1';
-        const userAgent = socket.handshake.headers['user-agent'] || 'Browser';
-
-        activeUsers.set(username, {
-          socketId: socket.id,
-          username: user.username,
-          publicKey: user.publicKey,
-          status: 'online',
-          ip: clientIp,
-          userAgent: userAgent,
-          connectedAt: new Date().toISOString()
-        });
-
-        activeSessions.set(socket.id, {
-          socketId: socket.id,
-          username: user.username,
-          ip: clientIp,
-          userAgent: userAgent,
-          connectedAt: new Date().toISOString()
-        });
-        
-        broadcastUserList();
+        // Update public key in activeUsers
+        const currentActive = activeUsers.get(username);
+        if (currentActive) {
+          currentActive.publicKey = user.publicKey;
+        }
 
         // Send global chat history to the newly joined user
         db.all('SELECT * FROM global_messages ORDER BY timestamp ASC LIMIT 100', (err, rows) => {
@@ -599,6 +611,7 @@ io.on('connection', (socket) => {
           [username],
           (err, pendingMsgs) => {
             if (!err && pendingMsgs && pendingMsgs.length > 0) {
+              console.log(`Delivering ${pendingMsgs.length} offline messages to ${username}`);
               pendingMsgs.forEach(pm => {
                 socket.emit('private_message', {
                   from: pm.fromUser,
@@ -627,13 +640,8 @@ io.on('connection', (socket) => {
     const finalMessageId = messageId || (Date.now().toString() + Math.random());
     const recipient = activeUsers.get(to);
 
-    // Always store the message for offline delivery (upsert)
-    db.run(
-      'INSERT OR IGNORE INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered) VALUES (?, ?, ?, ?, ?, ?)',
-      [finalMessageId, from, to, encryptedMessage, now, recipient ? 1 : 0]
-    );
-    
-    if (recipient) {
+    // Relay IMMEDIATELY if recipient socket is active (0ms real-time latency!)
+    if (recipient && recipient.socketId) {
       console.log(`Relaying E2EE message from ${from} to ${to}.`);
       io.to(recipient.socketId).emit('private_message', {
         from: from,
@@ -644,13 +652,18 @@ io.on('connection', (socket) => {
       // Notify sender: delivered
       socket.emit('message_status_update', { messageId: finalMessageId, status: 'delivered', from: to });
     }
-    // If offline, sender stays on 'sent' until recipient comes online
+
+    // Persist to DB asynchronously for offline delivery backup
+    db.run(
+      'INSERT OR IGNORE INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered) VALUES (?, ?, ?, ?, ?, ?)',
+      [finalMessageId, from, to, encryptedMessage, now, recipient ? 1 : 0]
+    );
   });
 
   socket.on('typing', (data) => {
     const { to, isTyping, from } = data;
     const recipient = activeUsers.get(to);
-    if (recipient) {
+    if (recipient && recipient.socketId) {
       io.to(recipient.socketId).emit('user_typing', { username: from, isTyping });
     }
   });
@@ -658,7 +671,7 @@ io.on('connection', (socket) => {
   socket.on('message_status_update', (data) => {
     const { to, messageId, status, from } = data;
     const sender = activeUsers.get(to); // The original sender of the message
-    if (sender) {
+    if (sender && sender.socketId) {
       io.to(sender.socketId).emit('message_status_update', {
         messageId,
         status,
@@ -699,31 +712,29 @@ io.on('connection', (socket) => {
   socket.on('public_message', (data) => {
     const { from, message, type, mimeType, fileName, fileBuffer, replyTo, messageId } = data;
     const finalMessageId = messageId || (Date.now().toString() + Math.random());
-    
     const now = new Date().toISOString();
+    
+    // 1. Broadcast INSTANTLY (0ms latency) to all connected clients
+    io.emit('public_message', {
+      from, 
+      message, 
+      type: type || 'text', 
+      mimeType: mimeType || null, 
+      fileName: fileName || null, 
+      fileBuffer: fileBuffer || null, 
+      replyTo: replyTo || null,
+      timestamp: now,
+      messageId: finalMessageId,
+      readCount: 0,
+      totalUsers: activeUsers.size
+    });
+
+    // 2. Persist to DB in background without blocking socket delivery
     db.run(
       'INSERT INTO global_messages (messageId, sender, message, type, mimeType, fileName, fileBuffer, replyTo, timestamp, reactions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [finalMessageId, from, message || null, type || 'text', mimeType || null, fileName || null, fileBuffer || null, replyTo ? JSON.stringify(replyTo) : null, now, '{}'],
       (err) => {
-        if (!err) {
-          // Count total registered users for read receipt denominator
-          db.get('SELECT COUNT(*) as total FROM users', (err2, row) => {
-            const totalUsers = row ? row.total : 0;
-            io.emit('public_message', {
-              from, 
-              message, 
-              type, 
-              mimeType, 
-              fileName, 
-              fileBuffer, 
-              replyTo,
-              timestamp: now,
-              messageId: finalMessageId,
-              readCount: 0,
-              totalUsers
-            });
-          });
-        }
+        if (err) console.error("Error saving global_message:", err);
       }
     );
   });
