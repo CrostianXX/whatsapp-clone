@@ -256,7 +256,14 @@ app.get('/api/messages/global/sync', authenticateUser, (req, res) => {
 app.get('/api/users', (req, res) => {
   db.all('SELECT id, username, publicKey, avatar, lastSeen FROM users', [], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
-    res.json(rows || []);
+    const formatted = (rows || []).map(r => ({
+      id: r.id,
+      username: r.username,
+      publicKey: r.publicKey || r.publickey || null,
+      avatar: r.avatar || null,
+      lastSeen: r.lastSeen || r.lastseen || null
+    }));
+    res.json(formatted);
   });
 });
 

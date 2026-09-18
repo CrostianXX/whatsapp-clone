@@ -706,9 +706,9 @@ const getUserList = (cb) => {
       }
       return {
         username: row.username,
-        publicKey: row.publicKey,
+        publicKey: row.publicKey || row.publickey || null,
         avatar: avatar,
-        lastSeen: row.lastSeen,
+        lastSeen: row.lastSeen || row.lastseen || null,
         status: isOnline ? 'online' : 'offline'
       };
     });

@@ -279,15 +279,25 @@ const GLOBAL_ROOM = {
         let privKeyStr = localStorage.getItem(`privateKey_${currentUser}`);
         let pubKeyStr = localStorage.getItem(`publicKey_${currentUser}`);
 
-        if (!privKeyStr || !pubKeyStr) {
+        let validKeyLoaded = false;
+        if (privKeyStr && pubKeyStr) {
+          try {
+            privateKeyRef.current = await importPrivateKey(privKeyStr);
+            validKeyLoaded = true;
+          } catch (err) {
+            console.warn("Corrupted or invalid private key in localStorage, regenerating fresh keys...", err);
+          }
+        }
+
+        if (!validKeyLoaded) {
           const keyPair = await generateKeyPair();
           pubKeyStr = await exportPublicKey(keyPair.publicKey);
           privKeyStr = await exportPrivateKey(keyPair.privateKey);
           localStorage.setItem(`publicKey_${currentUser}`, pubKeyStr);
           localStorage.setItem(`privateKey_${currentUser}`, privKeyStr);
+          privateKeyRef.current = await importPrivateKey(privKeyStr);
         }
 
-        privateKeyRef.current = await importPrivateKey(privKeyStr);
         setKeyError(false);
 
         if (pubKeyStr && token) {
