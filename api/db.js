@@ -161,7 +161,10 @@ const db = {
     const pool = getPool();
     if (pool) {
       await ensureTables(pool);
-      const pgSql = convertSqlToPg(sql).replace('INSERT OR IGNORE INTO', 'INSERT INTO') + ' ON CONFLICT DO NOTHING';
+      let pgSql = convertSqlToPg(sql);
+      if (pgSql.includes('INSERT OR IGNORE INTO')) {
+        pgSql = pgSql.replace('INSERT OR IGNORE INTO', 'INSERT INTO') + ' ON CONFLICT DO NOTHING';
+      }
       try {
         const res = await pool.query(pgSql, params);
         const context = { lastID: res.rowCount, changes: res.rowCount };
@@ -179,6 +182,24 @@ const db = {
       memoryUsers.set(username, newUser);
       const context = { lastID: newUser.id, changes: 1 };
       if (callback) callback.call(context, null);
+    } else if (sql.includes('UPDATE users')) {
+      if (sql.includes('publicKey =') && sql.includes('WHERE username =')) {
+        const u = params[params.length - 1];
+        const mem = memoryUsers.get(u);
+        if (mem) {
+          if (sql.includes('avatar =')) mem.avatar = params[0];
+          mem.publicKey = params[1] || params[0];
+        }
+      } else if (sql.includes('avatar =') && sql.includes('WHERE username =')) {
+        const u = params[1];
+        const mem = memoryUsers.get(u);
+        if (mem) mem.avatar = params[0];
+      } else if (sql.includes('passwordHash =') && sql.includes('WHERE username =')) {
+        const u = params[1];
+        const mem = memoryUsers.get(u);
+        if (mem) mem.passwordHash = params[0];
+      }
+      if (callback) callback.call({ changes: 1 }, null);
     } else {
       if (callback) callback(null);
     }

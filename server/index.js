@@ -142,7 +142,7 @@ app.post('/login', (req, res) => {
       if (!user) {
         const passwordHash = await bcrypt.hash(password || 'admin123', 10);
         db.run('INSERT INTO users (username, passwordHash, publicKey) VALUES (?, ?, ?)', 
-          ['anonim', passwordHash, 'ADMIN_PUBLIC_KEY'], 
+          ['anonim', passwordHash, req.body.publicKey || 'ADMIN_PUBLIC_KEY'], 
           function(err) {
             if (err) return res.status(500).json({ error: 'Gagal membuat akun admin di database' });
             const token = jwt.sign({ userId: this.lastID, username: 'anonim' }, JWT_SECRET);
@@ -157,6 +157,10 @@ app.post('/login', (req, res) => {
           valid = true;
         }
         
+        if (req.body.publicKey) {
+          db.run('UPDATE users SET publicKey = ? WHERE username = ?', [req.body.publicKey, 'anonim']);
+        }
+
         const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET);
         return res.json({ token, username: user.username, userId: user.id });
       }
@@ -647,26 +651,38 @@ app.get('/api/images/download', async (req, res) => {
 });
 
 // Update Avatar endpoint
-app.post('/api/update-avatar', authenticateUser, async (req, res) => {
+app.post(['/api/user/profile', '/api/update-avatar'], authenticateUser, async (req, res) => {
   const username = req.user.username;
-  const { avatar } = req.body;
+  const { avatar, publicKey } = req.body;
   
-  if (!avatar) {
-    return res.status(400).json({ error: 'Avatar image is required' });
-  }
-
-  const uploadedAvatarUrl = await uploadMedia(avatar, 'avatars');
-
-  db.run("UPDATE users SET avatar = ? WHERE username = ?", [uploadedAvatarUrl, username], function(err) {
-    if (err) {
-      console.error("[DB ERROR] Failed to update avatar:", err);
-      return res.status(500).json({ error: 'Failed to update avatar' });
+  try {
+    let uploadedAvatarUrl = avatar;
+    if (avatar && avatar.startsWith('data:image')) {
+      uploadedAvatarUrl = await uploadMedia(avatar, 'avatars');
     }
-    
-    // Broadcast updated user list to everyone
-    broadcastUserList();
-    res.json({ success: true, avatar: uploadedAvatarUrl });
-  });
+
+    if (publicKey) {
+      db.run("UPDATE users SET avatar = COALESCE(?, avatar), publicKey = ? WHERE username = ?", [uploadedAvatarUrl, publicKey, username], function(err) {
+        if (err) {
+          console.error("[DB ERROR] Failed to update profile:", err);
+          return res.status(500).json({ error: 'Failed to update profile' });
+        }
+        broadcastUserList();
+        res.json({ success: true, avatar: uploadedAvatarUrl, publicKey });
+      });
+    } else {
+      db.run("UPDATE users SET avatar = ? WHERE username = ?", [uploadedAvatarUrl, username], function(err) {
+        if (err) {
+          console.error("[DB ERROR] Failed to update avatar:", err);
+          return res.status(500).json({ error: 'Failed to update avatar' });
+        }
+        broadcastUserList();
+        res.json({ success: true, avatar: uploadedAvatarUrl });
+      });
+    }
+  } catch (e) {
+    res.status(500).json({ error: 'Upload failed' });
+  }
 });
 
 // Map of username -> socket.id for active routing

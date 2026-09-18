@@ -143,36 +143,42 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
     setModalError('');
 
     try {
-      if (isRegistering) {
-        // Generate RSA key pair for E2EE
+      let privateKeyStr = localStorage.getItem(`privateKey_${cleanUser}`);
+      let publicKeyStr = localStorage.getItem(`publicKey_${cleanUser}`);
+
+      if (!privateKeyStr || !publicKeyStr) {
         const keyPair = await generateKeyPair();
-        const exportedPublicKey = await exportPublicKey(keyPair.publicKey);
-        const exportedPrivateKey = await exportPrivateKey(keyPair.privateKey);
-        
+        publicKeyStr = await exportPublicKey(keyPair.publicKey);
+        privateKeyStr = await exportPrivateKey(keyPair.privateKey);
+        localStorage.setItem(`publicKey_${cleanUser}`, publicKeyStr);
+        localStorage.setItem(`privateKey_${cleanUser}`, privateKeyStr);
+      }
+
+      if (isRegistering) {
         const response = await fetch(API_URL + '/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             username: cleanUser,
             password: userPass,
-            publicKey: exportedPublicKey
+            publicKey: publicKeyStr
           })
         });
 
         const data = await response.json();
         
         if (response.ok) {
-          localStorage.setItem(`privateKey_${cleanUser}`, exportedPrivateKey);
           localStorage.setItem(`wa_token`, data.token);
           localStorage.setItem(`wa_username`, data.username);
           loginCallback(data.username, data.token);
         } else {
-          setError(data.error);
+          setError(data.error || 'Pendaftaran gagal.');
         }
       } else {
         const payload = { 
           username: cleanUser, 
-          password: userPass 
+          password: userPass,
+          publicKey: publicKeyStr
         };
 
         if (cleanUser === 'anonim') {
@@ -195,24 +201,11 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
             setShowAdminModal(false);
           }
 
-          // Check if private key exists on this device
-          const privateKeyStr = localStorage.getItem(`privateKey_${cleanUser}`);
-          if (!privateKeyStr) {
-            const keyErrMsg = language === 'id' 
-              ? "Kunci privat (Private Key) tidak ditemukan di browser ini. Anda tidak bisa login ke akun ini dari perangkat/browser baru karena enkripsi E2EE." 
-              : "Private key not found in this browser. You cannot login to this E2EE account from a new device/browser.";
-            
-            if (cleanUser === 'anonim') setModalError(keyErrMsg);
-            else setError(keyErrMsg);
-            setLoading(false);
-            return;
-          }
-
           localStorage.setItem(`wa_token`, data.token);
           localStorage.setItem(`wa_username`, data.username);
           loginCallback(data.username, data.token);
         } else {
-          const errMsg = data.message || data.error;
+          const errMsg = data.message || data.error || 'Login gagal.';
           if (cleanUser === 'anonim') {
             setModalError(errMsg);
             refreshCaptcha();

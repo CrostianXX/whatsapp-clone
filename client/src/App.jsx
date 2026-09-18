@@ -277,11 +277,23 @@ const GLOBAL_ROOM = {
     const initApp = async () => {
       try {
         const privKeyStr = localStorage.getItem(`privateKey_${currentUser}`);
+        const pubKeyStr = localStorage.getItem(`publicKey_${currentUser}`);
         if (privKeyStr) {
           privateKeyRef.current = await importPrivateKey(privKeyStr);
           setKeyError(false);
         } else {
           setKeyError(true);
+        }
+
+        if (pubKeyStr && token) {
+          fetch('/api/user/profile', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ publicKey: pubKeyStr })
+          }).catch(() => {});
         }
       } catch (e) {
         console.error("Error loading private key", e);
@@ -472,18 +484,34 @@ const GLOBAL_ROOM = {
         return;
       }
       
-      // Fetch initial user list via REST API so users load immediately
-      try {
-        const res = await fetch('/api/users');
-        if (res.ok) {
-          const userList = await res.json();
-          const me = userList.find(u => u.username === currentUser);
-          if (me && me.avatar) setMyAvatar(me.avatar);
-          setUsers([GLOBAL_ROOM, ...userList.filter(u => u.username !== currentUser)]);
+      const updateSelectedUserIfChanged = (userList) => {
+        if (selectedUserRef.current && selectedUserRef.current.username !== 'global') {
+          const fresh = userList.find(u => u.username === selectedUserRef.current.username);
+          if (fresh && (fresh.publicKey !== selectedUserRef.current.publicKey || fresh.avatar !== selectedUserRef.current.avatar)) {
+            setSelectedUser(fresh);
+            selectedUserRef.current = fresh;
+          }
         }
-      } catch (err) {
-        console.error("Failed to fetch initial user list via REST:", err);
-      }
+      };
+
+      // Fetch user list via REST API periodically so user list is always updated
+      const refreshUserList = async () => {
+        try {
+          const res = await fetch('/api/users');
+          if (res.ok) {
+            const userList = await res.json();
+            const me = userList.find(u => u.username === currentUser);
+            if (me && me.avatar) setMyAvatar(me.avatar);
+            setUsers([GLOBAL_ROOM, ...userList.filter(u => u.username !== currentUser)]);
+            updateSelectedUserIfChanged(userList);
+          }
+        } catch (err) {
+          console.error("Failed to fetch user list via REST:", err);
+        }
+      };
+
+      refreshUserList();
+      const userListInterval = setInterval(refreshUserList, 4000);
 
       newSocket.on('connect', () => {
         console.log("Socket connected with ID:", newSocket.id);
@@ -515,6 +543,7 @@ const GLOBAL_ROOM = {
         if (me && me.avatar) setMyAvatar(me.avatar);
         
         setUsers([GLOBAL_ROOM, ...userList.filter(u => u.username !== currentUser)]);
+        updateSelectedUserIfChanged(userList);
       });
 
       newSocket.on('private_message', async (data) => {
@@ -939,7 +968,34 @@ const GLOBAL_ROOM = {
         return;
       }
 
-      const recipientPubKey = await importPublicKey(selectedUser.publicKey);
+      let targetPubKeyStr = selectedUser.publicKey;
+
+      if (!targetPubKeyStr || targetPubKeyStr === 'ADMIN_PUBLIC_KEY') {
+        const found = users.find(u => u.username === selectedUser.username);
+        if (found && found.publicKey && found.publicKey !== 'ADMIN_PUBLIC_KEY') {
+          targetPubKeyStr = found.publicKey;
+        } else {
+          try {
+            const res = await fetch('/api/users');
+            if (res.ok) {
+              const freshUsers = await res.json();
+              const freshRecipient = freshUsers.find(u => u.username === selectedUser.username);
+              if (freshRecipient && freshRecipient.publicKey && freshRecipient.publicKey !== 'ADMIN_PUBLIC_KEY') {
+                targetPubKeyStr = freshRecipient.publicKey;
+              }
+            }
+          } catch (e) {}
+        }
+      }
+
+      if (!targetPubKeyStr || targetPubKeyStr === 'ADMIN_PUBLIC_KEY') {
+        alert(language === 'id' 
+          ? `Kunci enkripsi publik ${selectedUser.username} belum tersedia atau pengguna belum memperbarui kunci E2EE. Pengguna perlu login kembali.` 
+          : `Public key for ${selectedUser.username} is not available. The user needs to log in again to sync their key.`);
+        return;
+      }
+
+      const recipientPubKey = await importPublicKey(targetPubKeyStr);
       const messageId = Date.now().toString() + Math.random();
       
       // Encrypt and Send

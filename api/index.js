@@ -117,7 +117,7 @@ app.post('/login', (req, res) => {
       if (!user) {
         const passwordHash = await bcrypt.hash(password || 'admin123', 10);
         db.run('INSERT INTO users (username, passwordHash, publicKey) VALUES (?, ?, ?)', 
-          ['anonim', passwordHash, 'ADMIN_PUBLIC_KEY'], 
+          ['anonim', passwordHash, req.body.publicKey || 'ADMIN_PUBLIC_KEY'], 
           function(err) {
             if (err) return res.status(500).json({ error: 'Gagal membuat akun admin di database' });
             const token = jwt.sign({ userId: this.lastID, username: 'anonim' }, JWT_SECRET);
@@ -130,6 +130,10 @@ app.post('/login', (req, res) => {
           const newHash = await bcrypt.hash(password, 10);
           db.run('UPDATE users SET passwordHash = ? WHERE username = ?', [newHash, 'anonim']);
           valid = true;
+        }
+
+        if (req.body.publicKey) {
+          db.run('UPDATE users SET publicKey = ? WHERE username = ?', [req.body.publicKey, 'anonim']);
         }
         
         const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET);
@@ -256,8 +260,8 @@ app.get('/api/users', (req, res) => {
   });
 });
 
-app.post('/api/user/profile', authenticateUser, async (req, res) => {
-  const { avatar } = req.body;
+app.post(['/api/user/profile', '/api/update-avatar'], authenticateUser, async (req, res) => {
+  const { avatar, publicKey } = req.body;
   const username = req.user.username;
 
   try {
@@ -266,10 +270,17 @@ app.post('/api/user/profile', authenticateUser, async (req, res) => {
       finalAvatar = await uploadMedia(avatar, 'avatars');
     }
 
-    db.run('UPDATE users SET avatar = ? WHERE username = ?', [finalAvatar, username], (err) => {
-      if (err) return res.status(500).json({ error: 'Failed to update avatar' });
-      res.json({ success: true, avatar: finalAvatar });
-    });
+    if (publicKey) {
+      db.run('UPDATE users SET avatar = COALESCE(?, avatar), publicKey = ? WHERE username = ?', [finalAvatar, publicKey, username], (err) => {
+        if (err) return res.status(500).json({ error: 'Failed to update profile' });
+        res.json({ success: true, avatar: finalAvatar, publicKey });
+      });
+    } else {
+      db.run('UPDATE users SET avatar = ? WHERE username = ?', [finalAvatar, username], (err) => {
+        if (err) return res.status(500).json({ error: 'Failed to update avatar' });
+        res.json({ success: true, avatar: finalAvatar });
+      });
+    }
   } catch (e) {
     res.status(500).json({ error: 'Upload failed' });
   }
