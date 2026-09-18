@@ -507,6 +507,8 @@ app.post('/api/update-avatar', (req, res) => {
 });
 
 // Map of username -> socket.id for active routing
+const activeUsers = new Map();
+
 // Helper to get active users list
 const getUserList = (cb) => {
   db.all("SELECT username, publicKey, avatar, lastSeen FROM users", (err, rows) => {
