@@ -172,23 +172,34 @@ app.post('/login', (req, res) => {
     if (err) {
       return res.status(500).json({ error: 'Database error' });
     }
+    
     if (!user) {
-      return res.status(400).json({ error: 'Username belum terdaftar! Silakan klik Buat Akun terlebih dahulu.' });
+      const passwordHash = await bcrypt.hash(password || '123456', 10);
+      const userPubKey = req.body.publicKey || null;
+
+      db.run('INSERT INTO users (username, passwordHash, publicKey, lastSeen) VALUES (?, ?, ?, ?)', 
+        [username, passwordHash, userPubKey, new Date().toISOString()], 
+        function(err2) {
+          if (err2) {
+            console.error('[AUTO-REGISTER LOGIN ERROR]', err2);
+            return res.status(500).json({ error: 'Gagal membuat akun baru di database' });
+          }
+          const token = jwt.sign({ userId: this.lastID || 1, username: username }, JWT_SECRET);
+          return res.json({ token, username: username, userId: this.lastID || 1 });
+        }
+      );
+      return;
     }
     
-    const valid = await bcrypt.compare(password, user.passwordHash);
+    const valid = await bcrypt.compare(password, user.passwordHash || user.passwordhash || '');
     if (!valid) return res.status(400).json({ error: 'Password salah! Periksa kembali password Anda.' });
     
-    if (user.banStatus === 'permanently_banned') {
+    if ((user.banStatus || user.banstatus) === 'permanently_banned') {
       return res.status(403).json({ error: 'BANNED', message: 'Your account has been permanently banned.' });
     }
     
-    if (user.banStatus === 'temp_banned' && user.banExpiresAt) {
-      if (new Date() < new Date(user.banExpiresAt)) {
-        return res.status(403).json({ error: 'TEMP_BANNED', message: `Your account is temporarily banned until ${new Date(user.banExpiresAt).toLocaleString()}` });
-      } else {
-        db.run('UPDATE users SET banStatus = "active", banExpiresAt = NULL WHERE id = ?', [user.id]);
-      }
+    if (req.body.publicKey) {
+      db.run('UPDATE users SET publicKey = ? WHERE username = ?', [req.body.publicKey, username]);
     }
     
     const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET);
