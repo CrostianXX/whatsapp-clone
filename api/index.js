@@ -386,7 +386,7 @@ app.post('/api/messages/private/send', authenticateUser, (req, res) => {
   const now = new Date().toISOString();
 
   db.run(
-    "INSERT INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered, status) VALUES (?, ?, ?, ?, ?, 1, 'sent')",
+    "INSERT INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered, status) VALUES (?, ?, ?, ?, ?, 1, 'sent') ON CONFLICT (messageid) DO NOTHING",
     [finalMessageId, from, to, encryptedMessage, now],
     function(err) {
       if (err) {
@@ -398,6 +398,7 @@ app.post('/api/messages/private/send', authenticateUser, (req, res) => {
   );
 });
 
+
 app.post('/api/messages/global/send', authenticateUser, (req, res) => {
   const from = req.user.username;
   const { message, type, mimeType, fileName, fileBuffer, replyTo, messageId } = req.body;
@@ -406,7 +407,7 @@ app.post('/api/messages/global/send', authenticateUser, (req, res) => {
   const now = new Date().toISOString();
 
   db.run(
-    'INSERT INTO global_messages (messageId, sender, message, type, mimeType, fileName, fileBuffer, replyTo, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO global_messages (messageId, sender, message, type, mimeType, fileName, fileBuffer, replyTo, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (messageid) DO NOTHING',
     [finalMessageId, from, message || '', type || 'text', mimeType || null, fileName || null, fileBuffer || null, replyTo ? JSON.stringify(replyTo) : null, now],
     function(err) {
       if (err) {
@@ -417,6 +418,7 @@ app.post('/api/messages/global/send', authenticateUser, (req, res) => {
     }
   );
 });
+
 
 app.post(['/api/user/profile', '/api/update-avatar'], authenticateUser, async (req, res) => {
   const { avatar, publicKey } = req.body;
