@@ -1,3 +1,5 @@
+const app = require('../server/index.js');
+
 module.exports = (req, res) => {
-  res.status(200).json({ status: 'ok', message: 'Vercel Serverless Function Active' });
+  return app(req, res);
 };
