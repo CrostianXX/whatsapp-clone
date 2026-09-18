@@ -299,7 +299,7 @@ const GLOBAL_ROOM = {
             privKeyStr = await exportPrivateKey(keyPair.privateKey);
             localStorage.setItem(`publicKey_${currentUser}`, pubKeyStr);
             localStorage.setItem(`privateKey_${currentUser}`, privKeyStr);
-            privateKeyRef.current = await importPrivateKey(privKeyStr);
+            privateKeyRef.current = keyPair.privateKey;
             validKeyLoaded = true;
           } catch (genErr) {
             console.error("Key generation failed:", genErr);
