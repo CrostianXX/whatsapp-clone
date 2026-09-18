@@ -515,18 +515,23 @@ const broadcastUserList = () => {
       return;
     }
     
-    const allUsers = rows.map(row => ({
-      username: row.username,
-      publicKey: row.publicKey,
-      avatar: row.avatar,
-      lastSeen: row.lastSeen,
-      status: activeUsers.has(row.username) ? 'online' : 'offline'
-    }));
+    const allUsers = rows.map(row => {
+      const room = io.sockets.adapter.rooms.get(row.username);
+      const isOnline = (room && room.size > 0) || activeUsers.has(row.username);
+      return {
+        username: row.username,
+        publicKey: row.publicKey,
+        avatar: row.avatar,
+        lastSeen: row.lastSeen,
+        status: isOnline ? 'online' : 'offline'
+      };
+    });
     
     console.log("Broadcasting users_list with count:", allUsers.length);
     io.emit('users_list', allUsers);
   });
 };
+
 
 io.on('connection', (socket) => {
   const transport = socket.conn.transport.name;
@@ -543,6 +548,7 @@ io.on('connection', (socket) => {
   socket.on('join', (username) => {
     if (!username) return;
     socket.username = username;
+    socket.join(username); // Join socket room for this user
 
     const clientIp = socket.handshake.address || socket.request?.connection?.remoteAddress || '127.0.0.1';
     const userAgent = socket.handshake.headers['user-agent'] || 'Browser';
@@ -556,7 +562,6 @@ io.on('connection', (socket) => {
       userAgent: userAgent,
       connectedAt: new Date().toISOString()
     });
-
 
     activeSessions.set(socket.id, {
       socketId: socket.id,
@@ -630,7 +635,6 @@ io.on('connection', (socket) => {
                   timestamp: pm.timestamp
                 });
               });
-              // Mark all as delivered safely
               const ids = pendingMsgs.map(pm => pm.messageId);
               if (ids.length > 0) {
                 const placeholders = ids.map(() => '?').join(',');
@@ -643,29 +647,29 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Handle Private Messaging (E2EE)
+  // Handle Private Messaging (E2EE) using Socket Room Broadcasting
   socket.on('private_message', (data) => {
     const { to, encryptedMessage, from, messageId } = data;
     const now = new Date().toISOString();
     const finalMessageId = messageId || (Date.now().toString() + Math.random());
-    const recipient = activeUsers.get(to);
 
-    // Store in DB with delivered = 0 (will be updated to 1 when recipient ACKs)
+    const recipientRoom = io.sockets.adapter.rooms.get(to);
+    const isOnline = recipientRoom && recipientRoom.size > 0;
+
+    // Store in DB with delivered status
     db.run(
-      'INSERT OR IGNORE INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered) VALUES (?, ?, ?, ?, ?, 0)',
-      [finalMessageId, from, to, encryptedMessage, now]
+      'INSERT OR IGNORE INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered) VALUES (?, ?, ?, ?, ?, ?)',
+      [finalMessageId, from, to, encryptedMessage, now, isOnline ? 1 : 0]
     );
 
-    // Relay IMMEDIATELY if recipient socket is active (0ms real-time latency!)
-    if (recipient && recipient.socketId) {
-      console.log(`Relaying E2EE message from ${from} to ${to}.`);
-      io.to(recipient.socketId).emit('private_message', {
-        from: from,
-        encryptedMessage: encryptedMessage,
-        messageId: finalMessageId,
-        timestamp: now
-      });
-    }
+    // Relay IMMEDIATELY to room `to` (delivers to all active sockets of user `to`)
+    console.log(`Relaying E2EE message from ${from} to room ${to} (online sockets: ${recipientRoom ? recipientRoom.size : 0}).`);
+    io.to(to).emit('private_message', {
+      from: from,
+      encryptedMessage: encryptedMessage,
+      messageId: finalMessageId,
+      timestamp: now
+    });
   });
 
   // Handle ACK when recipient actually receives private message
@@ -673,38 +677,29 @@ io.on('connection', (socket) => {
     if (!messageId) return;
     db.run('UPDATE private_messages SET delivered = 1 WHERE messageId = ?', [messageId]);
     
-    // Relay status update 'delivered' to the original sender
     if (from) {
-      const sender = activeUsers.get(from);
-      if (sender && sender.socketId) {
-        io.to(sender.socketId).emit('message_status_update', {
-          messageId,
-          status: 'delivered',
-          from: socket.username || 'user'
-        });
-      }
+      io.to(from).emit('message_status_update', {
+        messageId,
+        status: 'delivered',
+        from: socket.username || 'user'
+      });
     }
   });
 
   socket.on('typing', (data) => {
     const { to, isTyping, from } = data;
-    const recipient = activeUsers.get(to);
-    if (recipient && recipient.socketId) {
-      io.to(recipient.socketId).emit('user_typing', { username: from, isTyping });
-    }
+    io.to(to).emit('user_typing', { username: from, isTyping });
   });
 
   socket.on('message_status_update', (data) => {
     const { to, messageId, status, from } = data;
-    const sender = activeUsers.get(to); // The original sender of the message
-    if (sender && sender.socketId) {
-      io.to(sender.socketId).emit('message_status_update', {
-        messageId,
-        status,
-        from
-      });
-    }
+    io.to(to).emit('message_status_update', {
+      messageId,
+      status,
+      from
+    });
   });
+
 
   // Track who has read a global message
   socket.on('global_message_read', ({ messageId, username }) => {
@@ -829,9 +824,9 @@ io.on('connection', (socket) => {
 
     const disconnectedUser = socket.username;
     if (disconnectedUser) {
-      const active = activeUsers.get(disconnectedUser);
-      // ONLY remove user from activeUsers if this disconnected socket is still the active one!
-      if (active && active.socketId === socket.id) {
+      const room = io.sockets.adapter.rooms.get(disconnectedUser);
+      const remainingCount = room ? room.size : 0;
+      if (remainingCount === 0) {
         activeUsers.delete(disconnectedUser);
         const now = new Date().toISOString();
         db.run("UPDATE users SET lastSeen = ? WHERE username = ?", [now, disconnectedUser], (err) => {
@@ -841,6 +836,7 @@ io.on('connection', (socket) => {
       }
     }
   });
+
 
 });
 

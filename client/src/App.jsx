@@ -233,8 +233,9 @@ function App() {
       // Key is now ready (or failed). Now connect socket using WebSocket transport directly.
       const newSocket = io(SOCKET_SERVER_URL, {
         auth: { token },
-        transports: ['websocket']
+        transports: ['websocket', 'polling']
       });
+
 
       if (isCancelled) {
         newSocket.close();
