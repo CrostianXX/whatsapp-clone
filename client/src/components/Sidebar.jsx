@@ -1,39 +1,78 @@
 import React, { useRef } from 'react';
 import { MoreVertical, MessageSquare, CircleDashed, Search, Filter, Lock, LogOut, Camera, Sun, Moon, Shield } from 'lucide-react';
 
-function Sidebar({ users, currentUser, myAvatar, onSelectUser, selectedUser, onLogout, unreadCounts = {}, onProfileClick, theme, toggleTheme, language, toggleLanguage, t, onAdminClick }) {
+function Sidebar({ users, currentUser, myAvatar, onAvatarUpdate, token, onSelectUser, selectedUser, onLogout, unreadCounts = {}, onProfileClick, theme, toggleTheme, language, toggleLanguage, t, onAdminClick }) {
   const fileInputRef = useRef(null);
 
   const handleAvatarClick = () => {
     fileInputRef.current?.click();
   };
 
+  const compressImage = (file, maxWidth = 200, maxHeight = 200, quality = 0.85) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (e) => {
+        const img = new Image();
+        img.src = e.target.result;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          if (width > height) {
+            if (width > maxWidth) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width = Math.round((width * maxHeight) / height);
+              height = maxHeight;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = (err) => reject(err);
+      };
+      reader.onerror = (err) => reject(err);
+    });
+  };
+
   const handleAvatarUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    if (file.size > 2 * 1024 * 1024) {
-      alert("Image must be smaller than 2MB");
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Image must be smaller than 5MB");
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64Avatar = event.target.result;
-      
-      try {
-        const response = await fetch('/api/update-avatar', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: currentUser, avatar: base64Avatar })
-        });
-        if (!response.ok) throw new Error('Failed to update avatar');
-      } catch (err) {
-        console.error(err);
-        alert('Failed to upload avatar');
+    try {
+      const compressedBase64 = await compressImage(file, 200, 200, 0.85);
+
+      // Instant local update
+      if (onAvatarUpdate) {
+        onAvatarUpdate(compressedBase64);
       }
-    };
-    reader.readAsDataURL(file);
+
+      const response = await fetch('/api/update-avatar', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token || localStorage.getItem('wa_token')}`
+        },
+        body: JSON.stringify({ avatar: compressedBase64 })
+      });
+
+      if (!response.ok) throw new Error('Failed to update avatar on server');
+    } catch (err) {
+      console.error("[AVATAR UPLOAD ERROR]", err);
+      alert('Gagal mengunggah foto profil.');
+    }
   };
 
   const otherUsers = users.filter((u) => u.username !== currentUser);

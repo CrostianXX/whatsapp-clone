@@ -949,6 +949,11 @@ const GLOBAL_ROOM = {
     setShowAdminDashboard(false);
   };
 
+  const handleAvatarUpdate = (newAvatar) => {
+    setMyAvatar(newAvatar);
+    setUsers(prev => prev.map(u => u.username === currentUser ? { ...u, avatar: newAvatar } : u));
+  };
+
   return (
     <div className="app-container">
       {keyError && (
@@ -963,6 +968,8 @@ const GLOBAL_ROOM = {
           users={users} 
           currentUser={currentUser}
           myAvatar={myAvatar}
+          onAvatarUpdate={handleAvatarUpdate}
+          token={token}
           onSelectUser={handleSelectUser}
           selectedUser={selectedUser}
           unreadCounts={unreadCounts}

@@ -691,15 +691,17 @@ app.get('/api/images/download', async (req, res) => {
 });
 
 // Update Avatar endpoint
-app.post('/api/update-avatar', (req, res) => {
-  const { username, avatar } = req.body;
+app.post('/api/update-avatar', authenticateUser, (req, res) => {
+  const username = req.user.username;
+  const { avatar } = req.body;
   
-  if (!username || !avatar) {
-    return res.status(400).json({ error: 'Username and avatar are required' });
+  if (!avatar) {
+    return res.status(400).json({ error: 'Avatar image is required' });
   }
 
   db.run("UPDATE users SET avatar = ? WHERE username = ?", [avatar, username], function(err) {
     if (err) {
+      console.error("[DB ERROR] Failed to update avatar:", err);
       return res.status(500).json({ error: 'Failed to update avatar' });
     }
     
@@ -724,7 +726,8 @@ const getUserList = (cb) => {
       const room = io.sockets.adapter.rooms.get(row.username);
       const isOnline = (room && room.size > 0) || activeUsers.has(row.username);
       let avatar = row.avatar;
-      if (avatar && avatar.length > 5000) {
+      // Allow base64 avatars up to 200KB
+      if (avatar && avatar.length > 200000) {
         avatar = null;
       }
       return {
