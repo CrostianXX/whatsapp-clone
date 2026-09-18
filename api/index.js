@@ -112,7 +112,7 @@ app.post('/login', (req, res) => {
 
     // Auto-create/ensure 'anonim' admin user exists in database on first login
     db.get('SELECT * FROM users WHERE username = ?', ['anonim'], async (err, user) => {
-      if (err) return res.status(500).json({ error: 'Database error' });
+      if (err) return res.status(500).json({ error: 'Database error: ' + (err.message || String(err)) });
       
       if (!user) {
         const passwordHash = await bcrypt.hash(password || 'admin123', 10);
