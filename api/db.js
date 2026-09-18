@@ -178,7 +178,8 @@ const db = {
       }
     }
     if (callback) callback(null);
-  }
+  },
+  getPool: getPool
 };
 
 module.exports = db;

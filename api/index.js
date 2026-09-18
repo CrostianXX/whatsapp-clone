@@ -274,6 +274,22 @@ app.get('/api/messages/global/sync', authenticateUser, (req, res) => {
   });
 });
 
+app.get('/api/health', (req, res) => {
+  const dbUrl = process.env.DATABASE_URL;
+  const pool = db.getPool ? db.getPool() : null;
+  
+  if (!dbUrl) {
+    return res.status(500).json({ status: 'ERROR', message: 'DATABASE_URL environment variable is missing' });
+  }
+
+  db.all('SELECT COUNT(*) as count FROM users', [], (err, rows) => {
+    if (err) {
+      return res.status(500).json({ status: 'ERROR', dbError: err.message });
+    }
+    res.json({ status: 'OK', userCount: rows[0]?.count || 0, hasDbUrl: true });
+  });
+});
+
 app.get('/api/users', (req, res) => {
   db.all('SELECT id, username, publicKey, avatar, lastSeen FROM users', [], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
