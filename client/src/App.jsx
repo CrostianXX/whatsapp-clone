@@ -269,10 +269,101 @@ const GLOBAL_ROOM = {
   useEffect(() => {
     if (!currentUser) return;
     
-    // IMPORTANT: Load the private key FIRST, then connect the socket.
-    // This prevents the race condition where offline messages arrive
-    // before privateKeyRef is set, causing silent decryption failures.
     let isCancelled = false;
+
+    const decryptPrivateMessageObj = async (pm, userCurrent) => {
+      let finalMsgObj = {
+        id: pm.messageId || pm.id,
+        sender: pm.fromUser || pm.sender,
+        timestamp: pm.timestamp,
+        status: pm.status || 'sent'
+      };
+
+      try {
+        if (!privateKeyRef.current) {
+          const privKeyStr = localStorage.getItem(`privateKey_${userCurrent}`);
+          if (privKeyStr) privateKeyRef.current = await importPrivateKey(privKeyStr);
+        }
+        if (!privateKeyRef.current) throw new Error("No private key available");
+
+        let parsedPayload = null;
+        const rawEnc = pm.encryptedMessage || pm.encryptedmessage;
+        try { parsedPayload = JSON.parse(rawEnc); } catch (e) {}
+
+        if (parsedPayload && parsedPayload.type === 'media') {
+          const encAesKey = (pm.fromUser === userCurrent || pm.sender === userCurrent)
+            ? (parsedPayload.encryptedAesKeyS || parsedPayload.encryptedAesKey)
+            : (parsedPayload.encryptedAesKeyR || parsedPayload.encryptedAesKey);
+
+          if (!encAesKey) throw new Error("No AES key for user");
+
+          const aesKey = await decryptAESKeyWithRSA(privateKeyRef.current, encAesKey);
+          const decryptedBuffer = await decryptMedia(aesKey, parsedPayload.encryptedContent);
+          const blob = new Blob([decryptedBuffer], { type: parsedPayload.mimeType });
+
+          return {
+            ...finalMsgObj,
+            type: 'media',
+            fileName: parsedPayload.fileName,
+            mimeType: parsedPayload.mimeType,
+            blob: blob,
+            mediaUrl: URL.createObjectURL(blob),
+            replyTo: parsedPayload.replyTo
+          };
+        } else {
+          let ciphertextToDecrypt = null;
+          if (parsedPayload && (parsedPayload.r || parsedPayload.s)) {
+            ciphertextToDecrypt = (pm.fromUser === userCurrent || pm.sender === userCurrent)
+              ? (parsedPayload.s || rawEnc)
+              : (parsedPayload.r || rawEnc);
+          } else {
+            ciphertextToDecrypt = rawEnc;
+          }
+
+          if (!ciphertextToDecrypt) throw new Error("Empty ciphertext");
+
+          const decryptedText = await decryptMessage(privateKeyRef.current, ciphertextToDecrypt);
+          let parsedTextObj = null;
+          try { parsedTextObj = JSON.parse(decryptedText); } catch(e) {}
+
+          if (parsedTextObj && parsedTextObj.text !== undefined) {
+            return { ...finalMsgObj, type: 'text', text: parsedTextObj.text, replyTo: parsedTextObj.replyTo };
+          } else {
+            return { ...finalMsgObj, type: 'text', text: decryptedText };
+          }
+        }
+      } catch (decErr) {
+        console.warn("[DECRYPT WARN]", pm.messageId || pm.id, decErr.message);
+        if (pm.fromUser === userCurrent || pm.sender === userCurrent) {
+          return { ...finalMsgObj, type: 'text', text: '[Sent Message]' };
+        }
+        return { ...finalMsgObj, type: 'text', text: '[Encrypted Message]' };
+      }
+    };
+
+    const refreshUserList = async () => {
+      try {
+        const res = await fetch('/api/users');
+        if (res.ok) {
+          const userList = await res.json();
+          const me = userList.find(u => u.username === currentUser);
+          if (me && me.avatar) setMyAvatar(me.avatar);
+          setUsers([GLOBAL_ROOM, ...userList.filter(u => u.username !== currentUser)]);
+          if (selectedUserRef.current && selectedUserRef.current.username !== 'global') {
+            const fresh = userList.find(u => u.username === selectedUserRef.current.username);
+            if (fresh && (fresh.publicKey !== selectedUserRef.current.publicKey || fresh.avatar !== selectedUserRef.current.avatar)) {
+              setSelectedUser(fresh);
+              selectedUserRef.current = fresh;
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch user list via REST:", err);
+      }
+    };
+
+    // Immediately fetch user list on mount / current user change
+    refreshUserList();
 
     const initApp = async () => {
       try {
@@ -330,7 +421,6 @@ const GLOBAL_ROOM = {
 
       if (isCancelled) return;
 
-      // Synchronization Engine: Sync unread counts, private messages, and global history from DB
       let lastSyncTime = 0;
       const syncAllMessages = async () => {
         if (!currentUser || !token) return;
@@ -363,57 +453,8 @@ const GLOBAL_ROOM = {
                 const peer = pm.fromUser === currentUser ? pm.toUser : pm.fromUser;
                 if (!decryptedPrivateMsgs[peer]) decryptedPrivateMsgs[peer] = [];
 
-                let finalMsgObj = {
-                  id: pm.messageId,
-                  sender: pm.fromUser,
-                  timestamp: pm.timestamp,
-                  status: pm.status || 'sent'
-                };
-
-                if (pm.toUser === currentUser) {
-                  try {
-                    if (!privateKeyRef.current) {
-                      const privKeyStr = localStorage.getItem(`privateKey_${currentUser}`);
-                      if (privKeyStr) privateKeyRef.current = await importPrivateKey(privKeyStr);
-                    }
-                    if (privateKeyRef.current) {
-                      let parsedPayload;
-                      try { parsedPayload = JSON.parse(pm.encryptedMessage); } catch (e) {}
-
-                      if (parsedPayload && parsedPayload.type === 'media') {
-                        const aesKey = await decryptAESKeyWithRSA(privateKeyRef.current, parsedPayload.encryptedAesKey);
-                        const decryptedBuffer = await decryptMedia(aesKey, parsedPayload.encryptedContent);
-                        const blob = new Blob([decryptedBuffer], { type: parsedPayload.mimeType });
-                        finalMsgObj = {
-                          ...finalMsgObj,
-                          type: 'media',
-                          fileName: parsedPayload.fileName,
-                          mimeType: parsedPayload.mimeType,
-                          blob: blob,
-                          mediaUrl: URL.createObjectURL(blob),
-                          replyTo: parsedPayload.replyTo
-                        };
-                      } else {
-                        const decryptedText = await decryptMessage(privateKeyRef.current, pm.encryptedMessage);
-                        let parsedTextObj = null;
-                        try { parsedTextObj = JSON.parse(decryptedText); } catch(e) {}
-                        if (parsedTextObj && parsedTextObj.text) {
-                          finalMsgObj = { ...finalMsgObj, type: 'text', text: parsedTextObj.text, replyTo: parsedTextObj.replyTo };
-                        } else {
-                          finalMsgObj = { ...finalMsgObj, type: 'text', text: decryptedText };
-                        }
-                      }
-                    }
-                  } catch (decErr) {
-                    console.error("[SYNC DECRYPT ERROR]", pm.messageId, decErr.message);
-                    finalMsgObj = { ...finalMsgObj, type: 'text', text: "[Encrypted Message]" };
-                  }
-                } else {
-                  finalMsgObj.type = 'text';
-                  finalMsgObj.text = '[Sent Message]';
-                }
-
-                decryptedPrivateMsgs[peer].push(finalMsgObj);
+                const decryptedObj = await decryptPrivateMessageObj(pm, currentUser);
+                decryptedPrivateMsgs[peer].push(decryptedObj);
               }
 
               setChats(prev => {
@@ -428,7 +469,7 @@ const GLOBAL_ROOM = {
                       map.set(m.id, {
                         ...m,
                         ...existing,
-                        text: (existing.text && existing.text !== '[Sent Message]') ? existing.text : m.text,
+                        text: (m.text && m.text !== '[Sent Message]' && m.text !== '[Encrypted Message]') ? m.text : (existing.text || m.text),
                         blob: existing.blob || m.blob,
                         mediaUrl: existing.mediaUrl || m.mediaUrl,
                         status: m.status || existing.status
@@ -444,6 +485,7 @@ const GLOBAL_ROOM = {
               });
             }
           }
+
 
           // 3. Fetch global message sync
           const gSyncRes = await fetch('/api/messages/global/sync', {
@@ -582,72 +624,21 @@ const GLOBAL_ROOM = {
         const t4 = Date.now();
         const { from, encryptedMessage, timestamp, messageId, t0, t1, t3 } = data;
         
-        let finalMsgObj = {
+        const finalMsgObj = await decryptPrivateMessageObj({
           id: messageId || (Date.now().toString() + Math.random()),
+          messageId: messageId,
+          fromUser: from,
           sender: from,
+          encryptedMessage: encryptedMessage,
           timestamp: timestamp
-        };
-        
-        try {
-          if (!privateKeyRef.current) {
-            const privKeyStr = localStorage.getItem(`privateKey_${currentUser}`);
-            if (privKeyStr) {
-              privateKeyRef.current = await importPrivateKey(privKeyStr);
-            }
-          }
-          if (!privateKeyRef.current) throw new Error("No private key");
-          
-          // Try parsing as JSON first (Media Hybrid Encryption)
-          let parsedPayload;
-          try {
-            parsedPayload = JSON.parse(encryptedMessage);
-          } catch (e) {
-            // If it fails to parse, it's a plain encrypted string
-          }
-
-          if (parsedPayload && parsedPayload.type === 'media') {
-            // 1. Decrypt AES Key using our RSA Private Key
-            const aesKey = await decryptAESKeyWithRSA(privateKeyRef.current, parsedPayload.encryptedAesKey);
-            
-            // 2. Decrypt Media using the AES Key
-            const decryptedBuffer = await decryptMedia(aesKey, parsedPayload.encryptedContent);
-            
-            // 3. Convert ArrayBuffer to Blob
-            const blob = new Blob([decryptedBuffer], { type: parsedPayload.mimeType });
-            
-            finalMsgObj = {
-               ...finalMsgObj,
-               type: 'media',
-               fileName: parsedPayload.fileName,
-               mimeType: parsedPayload.mimeType,
-               blob: blob,
-               mediaUrl: URL.createObjectURL(blob),
-               replyTo: parsedPayload.replyTo
-            };
-          } else {
-            // Normal Text Decryption
-            const decryptedText = await decryptMessage(privateKeyRef.current, encryptedMessage);
-            
-            let parsedTextObj = null;
-            try { parsedTextObj = JSON.parse(decryptedText); } catch(e) {}
-            
-            if (parsedTextObj && parsedTextObj.text) {
-               finalMsgObj = { ...finalMsgObj, type: 'text', text: parsedTextObj.text, replyTo: parsedTextObj.replyTo };
-            } else {
-               finalMsgObj = { ...finalMsgObj, type: 'text', text: decryptedText };
-            }
-          }
-        } catch (err) {
-          console.error("Decryption failed:", err);
-          finalMsgObj = { ...finalMsgObj, type: 'text', text: "[Encrypted Message - Could not decrypt]" };
-        }
+        }, currentUser);
         
         setChats(prev => {
           const userChat = prev[from] || [];
-          // Deduplicate by message id
           if (userChat.find(m => m.id === finalMsgObj.id)) return prev;
           return { ...prev, [from]: [...userChat, finalMsgObj] };
         });
+
 
         if (t0 && t1 && t3) {
           setTimeout(() => {
@@ -1032,48 +1023,61 @@ const GLOBAL_ROOM = {
       }
 
       if (!targetPubKeyStr || targetPubKeyStr === 'ADMIN_PUBLIC_KEY') {
-        try {
-          const fallbackPair = await generateKeyPair();
-          targetPubKeyStr = await exportPublicKey(fallbackPair.publicKey);
-        } catch (e) {}
+        alert(`Gagal mengirim pesan: Kunci publik ${selectedUser.username} belum terdaftar. Minta pengguna tersebut untuk login kembali.`);
+        return;
       }
 
       let recipientPubKey;
       try {
         recipientPubKey = await importPublicKey(targetPubKeyStr);
       } catch (e) {
-        const fallbackPair = await generateKeyPair();
-        recipientPubKey = fallbackPair.publicKey;
+        alert(`Gagal mengirim pesan: Kunci publik ${selectedUser.username} tidak valid.`);
+        return;
       }
+
+      const senderPubKeyStr = localStorage.getItem(`publicKey_${currentUser}`);
+      let senderPubKey = null;
+      if (senderPubKeyStr) {
+        try { senderPubKey = await importPublicKey(senderPubKeyStr); } catch (e) {}
+      }
+
       const messageId = Date.now().toString() + Math.random();
       
-      // Encrypt and Send
+      // Dual-Encryption: Encrypt for both recipient and sender so both can decrypt from DB
       let encryptedPayload;
 
       if (payload.type === 'text') {
         const textPayloadObj = { text: payload.text, replyTo: payload.replyTo };
-        encryptedPayload = await encryptMessage(recipientPubKey, JSON.stringify(textPayloadObj));
+        const textPayloadStr = JSON.stringify(textPayloadObj);
+
+        const encRecipient = await encryptMessage(recipientPubKey, textPayloadStr);
+        let encSender = null;
+        if (senderPubKey) {
+          try { encSender = await encryptMessage(senderPubKey, textPayloadStr); } catch (e) {}
+        }
+
+        encryptedPayload = JSON.stringify({ r: encRecipient, s: encSender });
       } else if (payload.type === 'media') {
-        // HYBRID ENCRYPTION
-        // 1. Generate AES Key
         const aesKey = await generateAESKey();
-        
-        // 2. Encrypt Media with AES Key
         const encryptedMediaBase64 = await encryptMedia(aesKey, payload.fileBuffer);
-        
-        // 3. Encrypt AES Key with RSA Public Key
-        const encryptedAesKey = await encryptAESKeyWithRSA(recipientPubKey, aesKey);
-        
-        // 4. Combine into JSON string
+
+        const encAesRecipient = await encryptAESKeyWithRSA(recipientPubKey, aesKey);
+        let encAesSender = null;
+        if (senderPubKey) {
+          try { encAesSender = await encryptAESKeyWithRSA(senderPubKey, aesKey); } catch (e) {}
+        }
+
         encryptedPayload = JSON.stringify({
           type: 'media',
           fileName: payload.fileName,
           mimeType: payload.mimeType,
           encryptedContent: encryptedMediaBase64,
-          encryptedAesKey: encryptedAesKey,
+          encryptedAesKeyR: encAesRecipient,
+          encryptedAesKeyS: encAesSender,
           replyTo: payload.replyTo
         });
       }
+
 
       socket.emit('private_message', {
         messageId: messageId,

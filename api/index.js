@@ -274,6 +274,78 @@ app.get('/api/messages/global/sync', authenticateUser, (req, res) => {
   });
 });
 
+app.get('/api/messages/unread-counts', authenticateUser, (req, res) => {
+  const username = req.user.username;
+  const unreadMap = {};
+
+  db.all(
+    'SELECT fromUser, COUNT(*) as count FROM private_messages WHERE toUser = ? AND status != "read" GROUP BY fromUser',
+    [username],
+    (err, privateRows) => {
+      if (!err && privateRows) {
+        privateRows.forEach(row => {
+          const from = row.fromUser || row.fromuser;
+          unreadMap[from] = parseInt(row.count) || 0;
+        });
+      }
+
+      db.get(
+        'SELECT COUNT(*) as count FROM global_messages WHERE sender != ? AND messageId NOT IN (SELECT messageId FROM global_message_reads WHERE username = ?)',
+        [username, username],
+        (err2, globalRow) => {
+          if (!err2 && globalRow) {
+            unreadMap['global'] = parseInt(globalRow.count) || 0;
+          } else {
+            unreadMap['global'] = 0;
+          }
+          res.json(unreadMap);
+        }
+      );
+    }
+  );
+});
+
+app.post('/api/messages/read', authenticateUser, (req, res) => {
+  const username = req.user.username;
+  const { room, messageIds } = req.body;
+
+  if (!room) return res.status(400).json({ error: 'Room required' });
+
+  const now = new Date().toISOString();
+
+  if (room === 'global') {
+    if (messageIds && Array.isArray(messageIds) && messageIds.length > 0) {
+      let completed = 0;
+      messageIds.forEach(id => {
+        db.run('INSERT OR IGNORE INTO global_message_reads (messageId, username) VALUES (?, ?)', [id, username], () => {
+          completed++;
+          if (completed === messageIds.length) res.json({ success: true });
+        });
+      });
+      if (messageIds.length === 0) res.json({ success: true });
+    } else {
+      db.all('SELECT messageId FROM global_messages', [], (err, rows) => {
+        if (!err && rows && rows.length > 0) {
+          rows.forEach(r => {
+            const mId = r.messageId || r.messageid;
+            db.run('INSERT OR IGNORE INTO global_message_reads (messageId, username) VALUES (?, ?)', [mId, username]);
+          });
+        }
+        res.json({ success: true });
+      });
+    }
+  } else {
+    db.run(
+      'UPDATE private_messages SET status = "read", readAt = ? WHERE toUser = ? AND fromUser = ? AND status != "read"',
+      [now, username, room],
+      function(err) {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        res.json({ success: true, updatedCount: this ? this.changes : 0 });
+      }
+    );
+  }
+});
+
 app.get('/api/health', (req, res) => {
   const dbUrl = process.env.DATABASE_URL;
   const pool = db.getPool ? db.getPool() : null;
