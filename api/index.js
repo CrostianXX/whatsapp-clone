@@ -260,28 +260,77 @@ app.get('/api/users', (req, res) => {
   });
 });
 
+app.post('/api/messages/private/send', authenticateUser, (req, res) => {
+  const from = req.user.username;
+  const { to, encryptedMessage, messageId } = req.body;
+
+  if (!to || !encryptedMessage) return res.status(400).json({ error: 'Recipient and encrypted message required' });
+
+  const finalMessageId = messageId || (Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9));
+  const now = new Date().toISOString();
+
+  db.run(
+    'INSERT INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered, status) VALUES (?, ?, ?, ?, ?, 1, "sent")',
+    [finalMessageId, from, to, encryptedMessage, now],
+    function(err) {
+      if (err) {
+        console.error('[DB ERROR] Failed to save private message:', err);
+        return res.status(500).json({ error: 'Failed to save message to database' });
+      }
+      res.json({ success: true, messageId: finalMessageId, timestamp: now, status: 'sent' });
+    }
+  );
+});
+
+app.post('/api/messages/global/send', authenticateUser, (req, res) => {
+  const from = req.user.username;
+  const { message, type, mimeType, fileName, fileBuffer, replyTo, messageId } = req.body;
+
+  const finalMessageId = messageId || (Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9));
+  const now = new Date().toISOString();
+
+  db.run(
+    'INSERT INTO global_messages (messageId, sender, message, type, mimeType, fileName, fileBuffer, replyTo, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [finalMessageId, from, message || '', type || 'text', mimeType || null, fileName || null, fileBuffer || null, replyTo ? JSON.stringify(replyTo) : null, now],
+    function(err) {
+      if (err) {
+        console.error('[DB ERROR] Failed to save global message:', err);
+        return res.status(500).json({ error: 'Failed to save global message' });
+      }
+      res.json({ success: true, messageId: finalMessageId, timestamp: now });
+    }
+  );
+});
+
 app.post(['/api/user/profile', '/api/update-avatar'], authenticateUser, async (req, res) => {
   const { avatar, publicKey } = req.body;
   const username = req.user.username;
 
   try {
-    let finalAvatar = avatar;
+    let finalAvatar = avatar || null;
     if (avatar && avatar.startsWith('data:image')) {
       finalAvatar = await uploadMedia(avatar, 'avatars');
     }
 
     if (publicKey) {
       db.run('UPDATE users SET avatar = COALESCE(?, avatar), publicKey = ? WHERE username = ?', [finalAvatar, publicKey, username], (err) => {
-        if (err) return res.status(500).json({ error: 'Failed to update profile' });
+        if (err) {
+          console.error('[DB ERROR] Failed to update profile:', err);
+          return res.status(500).json({ error: 'Failed to update profile' });
+        }
         res.json({ success: true, avatar: finalAvatar, publicKey });
       });
     } else {
       db.run('UPDATE users SET avatar = ? WHERE username = ?', [finalAvatar, username], (err) => {
-        if (err) return res.status(500).json({ error: 'Failed to update avatar' });
+        if (err) {
+          console.error('[DB ERROR] Failed to update avatar:', err);
+          return res.status(500).json({ error: 'Failed to update avatar' });
+        }
         res.json({ success: true, avatar: finalAvatar });
       });
     }
   } catch (e) {
+    console.error('[PROFILE UPDATE ERROR]', e);
     res.status(500).json({ error: 'Upload failed' });
   }
 });

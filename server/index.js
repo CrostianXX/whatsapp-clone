@@ -656,7 +656,7 @@ app.post(['/api/user/profile', '/api/update-avatar'], authenticateUser, async (r
   const { avatar, publicKey } = req.body;
   
   try {
-    let uploadedAvatarUrl = avatar;
+    let uploadedAvatarUrl = avatar || null;
     if (avatar && avatar.startsWith('data:image')) {
       uploadedAvatarUrl = await uploadMedia(avatar, 'avatars');
     }

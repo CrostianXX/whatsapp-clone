@@ -276,14 +276,19 @@ const GLOBAL_ROOM = {
 
     const initApp = async () => {
       try {
-        const privKeyStr = localStorage.getItem(`privateKey_${currentUser}`);
-        const pubKeyStr = localStorage.getItem(`publicKey_${currentUser}`);
-        if (privKeyStr) {
-          privateKeyRef.current = await importPrivateKey(privKeyStr);
-          setKeyError(false);
-        } else {
-          setKeyError(true);
+        let privKeyStr = localStorage.getItem(`privateKey_${currentUser}`);
+        let pubKeyStr = localStorage.getItem(`publicKey_${currentUser}`);
+
+        if (!privKeyStr || !pubKeyStr) {
+          const keyPair = await generateKeyPair();
+          pubKeyStr = await exportPublicKey(keyPair.publicKey);
+          privKeyStr = await exportPrivateKey(keyPair.privateKey);
+          localStorage.setItem(`publicKey_${currentUser}`, pubKeyStr);
+          localStorage.setItem(`privateKey_${currentUser}`, privKeyStr);
         }
+
+        privateKeyRef.current = await importPrivateKey(privKeyStr);
+        setKeyError(false);
 
         if (pubKeyStr && token) {
           fetch('/api/user/profile', {
@@ -296,7 +301,7 @@ const GLOBAL_ROOM = {
           }).catch(() => {});
         }
       } catch (e) {
-        console.error("Error loading private key", e);
+        console.error("Error loading or generating E2EE keys", e);
         setKeyError(true);
       }
 
@@ -400,6 +405,9 @@ const GLOBAL_ROOM = {
                       map.set(m.id, {
                         ...m,
                         ...existing,
+                        text: (existing.text && existing.text !== '[Sent Message]') ? existing.text : m.text,
+                        blob: existing.blob || m.blob,
+                        mediaUrl: existing.mediaUrl || m.mediaUrl,
                         status: m.status || existing.status
                       });
                     } else {
@@ -512,6 +520,7 @@ const GLOBAL_ROOM = {
 
       refreshUserList();
       const userListInterval = setInterval(refreshUserList, 4000);
+      const messageSyncInterval = setInterval(syncAllMessages, 2500);
 
       newSocket.on('connect', () => {
         console.log("Socket connected with ID:", newSocket.id);
@@ -965,6 +974,17 @@ const GLOBAL_ROOM = {
         });
 
         socket.emit('public_message', publicPayload);
+
+        if (token) {
+          fetch('/api/messages/global/send', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(publicPayload)
+          }).catch(err => console.error("REST global send error:", err));
+        }
         return;
       }
 
@@ -1033,6 +1053,21 @@ const GLOBAL_ROOM = {
         encryptedMessage: encryptedPayload,
         t0
       });
+
+      if (token) {
+        fetch('/api/messages/private/send', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            to: selectedUser.username,
+            encryptedMessage: encryptedPayload,
+            messageId: messageId
+          })
+        }).catch(err => console.error("REST private send error:", err));
+      }
 
       const localMsgObj = {
         id: messageId,
