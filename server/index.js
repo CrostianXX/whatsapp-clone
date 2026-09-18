@@ -524,10 +524,16 @@ const broadcastUserList = () => {
       const allUsers = rows.map(row => {
         const room = io.sockets.adapter.rooms.get(row.username);
         const isOnline = (room && room.size > 0) || activeUsers.has(row.username);
+        // IMPORTANT: Only include avatar if it's a short URL (not a huge base64 blob)
+        // Base64 avatars > 5KB cause parse errors when broadcast to all clients
+        let avatar = row.avatar;
+        if (avatar && avatar.length > 5000) {
+          avatar = null; // Too large for broadcast, client will use default
+        }
         return {
           username: row.username,
           publicKey: row.publicKey,
-          avatar: row.avatar,
+          avatar: avatar,
           lastSeen: row.lastSeen,
           status: isOnline ? 'online' : 'offline'
         };
@@ -537,6 +543,7 @@ const broadcastUserList = () => {
     });
   }, 300); // 300ms debounce
 };
+
 
 
 io.on('connection', (socket) => {
