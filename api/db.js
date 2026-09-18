@@ -29,7 +29,12 @@ function getPool() {
       pgPool = new Pool({
         connectionString: process.env.DATABASE_URL,
         ssl: { rejectUnauthorized: false },
-        connectionTimeoutMillis: 3000
+        connectionTimeoutMillis: 10000,
+        idleTimeoutMillis: 30000,
+        max: 20
+      });
+      pgPool.on('error', (err) => {
+        console.warn('[PG POOL IDLE CLIENT ERROR]', err.message);
       });
     } catch (e) {
       console.warn('[PG POOL CREATION WARN]', e.message);
@@ -100,7 +105,10 @@ async function ensureTables(pool) {
 
 function convertSqlToPg(sql) {
   let index = 1;
-  return sql.replace(/\?/g, () => `$${index++}`);
+  let pgSql = sql.replace(/\?/g, () => `$${index++}`);
+  // Replace double quoted string literals like "sent" or "active" with single quotes for PG compatibility
+  pgSql = pgSql.replace(/"(sent|active|permanently_banned|temp_banned|delivered|read)"/g, "'$1'");
+  return pgSql;
 }
 
 const db = {

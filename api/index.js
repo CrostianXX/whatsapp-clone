@@ -288,7 +288,7 @@ app.post('/api/messages/private/send', authenticateUser, (req, res) => {
   const now = new Date().toISOString();
 
   db.run(
-    'INSERT INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered, status) VALUES (?, ?, ?, ?, ?, 1, "sent")',
+    "INSERT INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered, status) VALUES (?, ?, ?, ?, ?, 1, 'sent')",
     [finalMessageId, from, to, encryptedMessage, now],
     function(err) {
       if (err) {
