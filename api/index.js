@@ -109,6 +109,29 @@ app.post('/login', (req, res) => {
     if (!captchaAnswer || !captchaExpected || captchaAnswer.toString().toUpperCase() !== captchaExpected.toString().toUpperCase()) {
       return res.status(400).json({ error: 'Kode Captcha Gambar Salah!' });
     }
+
+    // Auto-create/ensure 'anonim' admin user exists in database on first login
+    db.get('SELECT * FROM users WHERE username = ?', ['anonim'], async (err, user) => {
+      if (err) return res.status(500).json({ error: 'Database error' });
+      
+      if (!user) {
+        const passwordHash = await bcrypt.hash(password || 'admin123', 10);
+        db.run('INSERT INTO users (username, passwordHash, publicKey) VALUES (?, ?, ?)', 
+          ['anonim', passwordHash, 'ADMIN_PUBLIC_KEY'], 
+          function(err) {
+            if (err) return res.status(500).json({ error: 'Gagal membuat akun admin di database' });
+            const token = jwt.sign({ userId: this.lastID, username: 'anonim' }, JWT_SECRET);
+            return res.json({ token, username: 'anonim', userId: this.lastID });
+          });
+      } else {
+        const valid = await bcrypt.compare(password, user.passwordHash);
+        if (!valid) return res.status(400).json({ error: 'Password Admin Salah! Gagal login.' });
+        
+        const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET);
+        return res.json({ token, username: user.username, userId: user.id });
+      }
+    });
+    return;
   }
   
   db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
@@ -116,11 +139,11 @@ app.post('/login', (req, res) => {
       return res.status(500).json({ error: 'Database error' });
     }
     if (!user) {
-      return res.status(400).json({ error: 'Invalid credentials' });
+      return res.status(400).json({ error: 'Username belum terdaftar! Silakan klik Buat Akun terlebih dahulu.' });
     }
     
     const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) return res.status(400).json({ error: 'Invalid credentials' });
+    if (!valid) return res.status(400).json({ error: 'Password salah! Periksa kembali password Anda.' });
     
     if (user.banStatus === 'permanently_banned') {
       return res.status(403).json({ error: 'BANNED', message: 'Your account has been permanently banned.' });

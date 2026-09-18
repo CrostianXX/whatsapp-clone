@@ -126,7 +126,6 @@ app.post('/register', async (req, res) => {
 
 app.post('/login', (req, res) => {
   const { username, password, adminPin, captchaAnswer, captchaExpected } = req.body;
-  console.log(`[LOGIN ATTEMPT] username: '${username}', password length: ${password ? password.length : 0}`);
   
   if (username === 'anonim') {
     if (!adminPin || adminPin !== ADMIN_PIN) {
@@ -135,23 +134,41 @@ app.post('/login', (req, res) => {
     if (!captchaAnswer || !captchaExpected || captchaAnswer.toString().toUpperCase() !== captchaExpected.toString().toUpperCase()) {
       return res.status(400).json({ error: 'Kode Captcha Gambar Salah!' });
     }
+
+    // Auto-create/ensure 'anonim' admin user exists in database on first login
+    db.get('SELECT * FROM users WHERE username = ?', ['anonim'], async (err, user) => {
+      if (err) return res.status(500).json({ error: 'Database error' });
+      
+      if (!user) {
+        const passwordHash = await bcrypt.hash(password || 'admin123', 10);
+        db.run('INSERT INTO users (username, passwordHash, publicKey) VALUES (?, ?, ?)', 
+          ['anonim', passwordHash, 'ADMIN_PUBLIC_KEY'], 
+          function(err) {
+            if (err) return res.status(500).json({ error: 'Gagal membuat akun admin di database' });
+            const token = jwt.sign({ userId: this.lastID, username: 'anonim' }, JWT_SECRET);
+            return res.json({ token, username: 'anonim', userId: this.lastID });
+          });
+      } else {
+        const valid = await bcrypt.compare(password, user.passwordHash);
+        if (!valid) return res.status(400).json({ error: 'Password Admin Salah! Gagal login.' });
+        
+        const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET);
+        return res.json({ token, username: user.username, userId: user.id });
+      }
+    });
+    return;
   }
   
   db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
     if (err) {
-      console.log(`[LOGIN DB ERROR]`, err);
       return res.status(500).json({ error: 'Database error' });
     }
     if (!user) {
-      console.log(`[LOGIN FAILED] user not found`);
-      return res.status(400).json({ error: 'Invalid credentials' });
+      return res.status(400).json({ error: 'Username belum terdaftar! Silakan klik Buat Akun terlebih dahulu.' });
     }
     
-    console.log(`[LOGIN] Found user, comparing password...`);
     const valid = await bcrypt.compare(password, user.passwordHash);
-    console.log(`[LOGIN] bcrypt.compare result:`, valid);
-    
-    if (!valid) return res.status(400).json({ error: 'Invalid credentials' });
+    if (!valid) return res.status(400).json({ error: 'Password salah! Periksa kembali password Anda.' });
     
     if (user.banStatus === 'permanently_banned') {
       return res.status(403).json({ error: 'BANNED', message: 'Your account has been permanently banned.' });
@@ -161,7 +178,6 @@ app.post('/login', (req, res) => {
       if (new Date() < new Date(user.banExpiresAt)) {
         return res.status(403).json({ error: 'TEMP_BANNED', message: `Your account is temporarily banned until ${new Date(user.banExpiresAt).toLocaleString()}` });
       } else {
-        // Ban expired, remove it
         db.run('UPDATE users SET banStatus = "active", banExpiresAt = NULL WHERE id = ?', [user.id]);
       }
     }
