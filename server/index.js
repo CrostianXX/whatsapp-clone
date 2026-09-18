@@ -35,10 +35,13 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   maxHttpBufferSize: 5e7, // 50 MB
+  pingTimeout: 60000,
+  pingInterval: 25000,
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  transports: ['websocket', 'polling']
 });
 
 const JWT_SECRET = 'super-secret-whatsapp-key-123'; // In production, use environment variable
@@ -640,6 +643,12 @@ io.on('connection', (socket) => {
     const finalMessageId = messageId || (Date.now().toString() + Math.random());
     const recipient = activeUsers.get(to);
 
+    // Store in DB with delivered = 0 (will be updated to 1 when recipient ACKs)
+    db.run(
+      'INSERT OR IGNORE INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered) VALUES (?, ?, ?, ?, ?, 0)',
+      [finalMessageId, from, to, encryptedMessage, now]
+    );
+
     // Relay IMMEDIATELY if recipient socket is active (0ms real-time latency!)
     if (recipient && recipient.socketId) {
       console.log(`Relaying E2EE message from ${from} to ${to}.`);
@@ -649,15 +658,25 @@ io.on('connection', (socket) => {
         messageId: finalMessageId,
         timestamp: now
       });
-      // Notify sender: delivered
-      socket.emit('message_status_update', { messageId: finalMessageId, status: 'delivered', from: to });
     }
+  });
 
-    // Persist to DB asynchronously for offline delivery backup
-    db.run(
-      'INSERT OR IGNORE INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered) VALUES (?, ?, ?, ?, ?, ?)',
-      [finalMessageId, from, to, encryptedMessage, now, recipient ? 1 : 0]
-    );
+  // Handle ACK when recipient actually receives private message
+  socket.on('message_received_ack', ({ messageId, from }) => {
+    if (!messageId) return;
+    db.run('UPDATE private_messages SET delivered = 1 WHERE messageId = ?', [messageId]);
+    
+    // Relay status update 'delivered' to the original sender
+    if (from) {
+      const sender = activeUsers.get(from);
+      if (sender && sender.socketId) {
+        io.to(sender.socketId).emit('message_status_update', {
+          messageId,
+          status: 'delivered',
+          from: socket.username || 'user'
+        });
+      }
+    }
   });
 
   socket.on('typing', (data) => {

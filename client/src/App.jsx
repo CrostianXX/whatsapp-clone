@@ -228,7 +228,8 @@ function App() {
 
       // Key is now ready (or failed). Now connect socket.
       const newSocket = io(SOCKET_SERVER_URL, {
-        auth: { token }
+        auth: { token },
+        transports: ['websocket', 'polling']
       });
       setSocket(newSocket);
       
@@ -333,6 +334,11 @@ function App() {
         }
 
         if (messageId) {
+          newSocket.emit('message_received_ack', {
+            messageId: messageId,
+            from: from
+          });
+
           newSocket.emit('message_status_update', {
             to: from,
             from: currentUser,
