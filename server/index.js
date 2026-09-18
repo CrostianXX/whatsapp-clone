@@ -48,73 +48,9 @@ const io = new Server(server, {
 
 const JWT_SECRET = 'super-secret-whatsapp-key-123'; // In production, use environment variable
 
-// Setup SQLite Database
-const dbPath = process.env.DB_PATH || './database.sqlite';
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error opening database', err);
-  } else {
-    db.serialize(() => {
-      db.run(`CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        passwordHash TEXT,
-        publicKey TEXT,
-        avatar TEXT,
-        lastSeen TEXT,
-        banStatus TEXT DEFAULT 'active',
-        banExpiresAt TEXT
-      )`);
-
-      db.run(`CREATE TABLE IF NOT EXISTS global_messages (
-        messageId TEXT PRIMARY KEY,
-        sender TEXT,
-        message TEXT,
-        type TEXT,
-        mimeType TEXT,
-        fileName TEXT,
-        fileBuffer TEXT,
-        replyTo TEXT,
-        timestamp TEXT
-      )`);
-
-      // Store E2EE private messages for offline delivery
-      db.run(`CREATE TABLE IF NOT EXISTS private_messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        messageId TEXT UNIQUE,
-        fromUser TEXT,
-        toUser TEXT,
-        encryptedMessage TEXT,
-        timestamp TEXT,
-        delivered INTEGER DEFAULT 0
-      )`);
-
-      // Track who has read each global message
-      db.run(`CREATE TABLE IF NOT EXISTS global_message_reads (
-        messageId TEXT,
-        username TEXT,
-        PRIMARY KEY (messageId, username)
-      )`);
-      
-      db.run(`ALTER TABLE users ADD COLUMN avatar TEXT`, (err) => {});
-      db.run(`ALTER TABLE users ADD COLUMN lastSeen TEXT`, (err) => {});
-      db.run(`ALTER TABLE users ADD COLUMN banStatus TEXT DEFAULT 'active'`, (err) => {});
-      db.run(`ALTER TABLE users ADD COLUMN banExpiresAt TEXT`, (err) => {});
-      db.run(`ALTER TABLE global_messages ADD COLUMN reactions TEXT DEFAULT '{}'`, (err) => {});
-
-      // Add status, deliveredAt, readAt columns to private_messages
-      db.run(`ALTER TABLE private_messages ADD COLUMN status TEXT DEFAULT 'sent'`, (err) => {});
-      db.run(`ALTER TABLE private_messages ADD COLUMN deliveredAt TEXT`, (err) => {});
-      db.run(`ALTER TABLE private_messages ADD COLUMN readAt TEXT`, (err) => {});
-
-      // Create indexes for efficient querying and sync
-      db.run(`CREATE INDEX IF NOT EXISTS idx_pm_to_status ON private_messages(toUser, status)`);
-      db.run(`CREATE INDEX IF NOT EXISTS idx_pm_conversation ON private_messages(fromUser, toUser, timestamp)`);
-      db.run(`CREATE INDEX IF NOT EXISTS idx_gm_timestamp ON global_messages(timestamp)`);
-      db.run(`CREATE INDEX IF NOT EXISTS idx_gmr_user ON global_message_reads(username, messageId)`);
-    });
-  }
-});
+// Database & Cloudinary Helpers
+const db = require('./db');
+const { uploadMedia } = require('./cloudinary');
 
 const ADMIN_PIN = process.env.ADMIN_PIN || '123458';
 
@@ -691,7 +627,7 @@ app.get('/api/images/download', async (req, res) => {
 });
 
 // Update Avatar endpoint
-app.post('/api/update-avatar', authenticateUser, (req, res) => {
+app.post('/api/update-avatar', authenticateUser, async (req, res) => {
   const username = req.user.username;
   const { avatar } = req.body;
   
@@ -699,7 +635,9 @@ app.post('/api/update-avatar', authenticateUser, (req, res) => {
     return res.status(400).json({ error: 'Avatar image is required' });
   }
 
-  db.run("UPDATE users SET avatar = ? WHERE username = ?", [avatar, username], function(err) {
+  const uploadedAvatarUrl = await uploadMedia(avatar, 'avatars');
+
+  db.run("UPDATE users SET avatar = ? WHERE username = ?", [uploadedAvatarUrl, username], function(err) {
     if (err) {
       console.error("[DB ERROR] Failed to update avatar:", err);
       return res.status(500).json({ error: 'Failed to update avatar' });
@@ -707,7 +645,7 @@ app.post('/api/update-avatar', authenticateUser, (req, res) => {
     
     // Broadcast updated user list to everyone
     broadcastUserList();
-    res.json({ success: true });
+    res.json({ success: true, avatar: uploadedAvatarUrl });
   });
 });
 
@@ -763,6 +701,20 @@ const broadcastUserList = () => {
 
 
 
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      socket.username = decoded.username;
+      socket.join(decoded.username);
+    } catch (err) {
+      // Token invalid or unauthenticated, ignore
+    }
+  }
+  next();
+});
+
 io.on('connection', (socket) => {
 
   socket.on('error', (err) => {
@@ -772,7 +724,8 @@ io.on('connection', (socket) => {
   // Handle user joining (authenticating their socket)
   socket.on('join', (username) => {
     if (!username) return;
-    console.log(`[JOIN] ${username} joined with socket ${socket.id}`);
+    const isRejoin = socket.username === username && socket.hasJoined;
+    console.log(`[JOIN] ${username} joined with socket ${socket.id} (isRejoin: ${isRejoin})`);
     socket.username = username;
     socket.join(username); // Join socket room for this user
 
@@ -833,46 +786,72 @@ io.on('connection', (socket) => {
           currentActive.publicKey = user.publicKey;
         }
 
-        // Send global chat history to the newly joined user
-        db.all('SELECT * FROM global_messages ORDER BY timestamp ASC LIMIT 100', (err, rows) => {
-          if (!err && rows) {
-            const history = [];
-            for (const row of rows) {
-              try {
-                history.push({
-                  messageId: row.messageId,
-                  from: row.sender,
-                  message: row.message,
-                  type: row.type,
-                  mimeType: row.mimeType,
-                  fileName: row.fileName,
-                  fileBuffer: row.type === 'media' ? row.fileBuffer : null,
-                  replyTo: row.replyTo ? JSON.parse(row.replyTo) : null,
-                  timestamp: row.timestamp,
-                  reactions: row.reactions ? JSON.parse(row.reactions) : {}
-                });
-              } catch (parseErr) {
-                console.error("Error parsing global message row:", row.messageId, parseErr.message);
-                // Still include the message but with safe defaults
-                history.push({
-                  messageId: row.messageId,
-                  from: row.sender,
-                  message: row.message,
-                  type: row.type || 'text',
-                  mimeType: null,
-                  fileName: null,
-                  fileBuffer: null,
-                  replyTo: null,
-                  timestamp: row.timestamp,
-                  reactions: {}
-                });
+        // Send global chat history to the newly joined user (only once per socket session)
+        if (!socket.hasJoined) {
+          socket.hasJoined = true;
+          db.all('SELECT * FROM global_messages ORDER BY timestamp ASC LIMIT 100', (err, rows) => {
+            if (!err && rows) {
+              const history = [];
+              for (const row of rows) {
+                try {
+                  history.push({
+                    messageId: row.messageId,
+                    from: row.sender,
+                    message: row.message,
+                    type: row.type,
+                    mimeType: row.mimeType,
+                    fileName: row.fileName,
+                    fileBuffer: row.type === 'media' ? row.fileBuffer : null,
+                    replyTo: row.replyTo ? JSON.parse(row.replyTo) : null,
+                    timestamp: row.timestamp,
+                    reactions: row.reactions ? JSON.parse(row.reactions) : {}
+                  });
+                } catch (parseErr) {
+                  console.error("Error parsing global message row:", row.messageId, parseErr.message);
+                  history.push({
+                    messageId: row.messageId,
+                    from: row.sender,
+                    message: row.message,
+                    type: row.type || 'text',
+                    mimeType: null,
+                    fileName: null,
+                    fileBuffer: null,
+                    replyTo: null,
+                    timestamp: row.timestamp,
+                    reactions: {}
+                  });
+                }
               }
+              socket.emit('global_history', history);
             }
-            socket.emit('global_history', history);
-          }
-        });
+          });
+        }
 
         // Deliver any pending offline private messages
+        db.all(
+          'SELECT * FROM private_messages WHERE toUser = ? AND delivered = 0 ORDER BY timestamp ASC',
+          [username],
+          (err, pendingMsgs) => {
+            if (!err && pendingMsgs && pendingMsgs.length > 0) {
+              console.log(`Delivering ${pendingMsgs.length} offline messages to ${username}`);
+              pendingMsgs.forEach(pm => {
+                socket.emit('private_message', {
+                  from: pm.fromUser,
+                  encryptedMessage: pm.encryptedMessage,
+                  messageId: pm.messageId,
+                  timestamp: pm.timestamp
+                });
+              });
+              const ids = pendingMsgs.map(pm => pm.messageId);
+              if (ids.length > 0) {
+                const placeholders = ids.map(() => '?').join(',');
+                db.run(`UPDATE private_messages SET delivered = 1 WHERE messageId IN (${placeholders})`, ids);
+              }
+            }
+          }
+        );
+      } else {
+        // Fallback for non-banned users not found in users table yet
         db.all(
           'SELECT * FROM private_messages WHERE toUser = ? AND delivered = 0 ORDER BY timestamp ASC',
           [username],
@@ -901,7 +880,8 @@ io.on('connection', (socket) => {
 
   // Handle Private Messaging (E2EE) using Socket Room Broadcasting
   socket.on('private_message', (data) => {
-    const { to, encryptedMessage, from, messageId } = data;
+    const t1 = Date.now();
+    const { to, encryptedMessage, from, messageId, t0 = t1 } = data;
     const now = new Date().toISOString();
     const finalMessageId = messageId || (Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9));
 
@@ -909,14 +889,19 @@ io.on('connection', (socket) => {
     const isOnline = recipientRoom && recipientRoom.size > 0;
     const initialStatus = isOnline ? 'delivered' : 'sent';
 
+    let t2 = t1;
     // Store in DB with status
     db.run(
       'INSERT OR IGNORE INTO private_messages (messageId, fromUser, toUser, encryptedMessage, timestamp, delivered, status, deliveredAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [finalMessageId, from, to, encryptedMessage, now, isOnline ? 1 : 0, initialStatus, isOnline ? now : null],
       (err) => {
+        t2 = Date.now();
         if (err) console.error("[DB ERROR] Save private message:", err);
+        else console.log(`[TIMING SERVER] Private Msg ${finalMessageId} | T1-T0: ${t1 - t0}ms | DB T2-T1: ${t2 - t1}ms`);
       }
     );
+
+    const t3 = Date.now();
 
     // Relay IMMEDIATELY to room `to` (delivers to all active sockets of user `to`)
     console.log(`Relaying E2EE message ${finalMessageId} from ${from} to room ${to} (online: ${isOnline}).`);
@@ -926,7 +911,10 @@ io.on('connection', (socket) => {
       encryptedMessage: encryptedMessage,
       messageId: finalMessageId,
       timestamp: now,
-      status: initialStatus
+      status: initialStatus,
+      t0,
+      t1,
+      t3
     });
 
     // Notify sender of status update
@@ -1008,11 +996,18 @@ io.on('connection', (socket) => {
   });
 
   // Handle Public Messaging (Global Server Room)
-  socket.on('public_message', (data) => {
-    const { from, message, type, mimeType, fileName, fileBuffer, replyTo, messageId } = data;
+  socket.on('public_message', async (data) => {
+    const t1 = Date.now();
+    let { from, message, type, mimeType, fileName, fileBuffer, replyTo, messageId, t0 = t1 } = data;
     const finalMessageId = messageId || (Date.now().toString() + Math.random());
     const now = new Date().toISOString();
     
+    // Upload media to Cloudinary if configured
+    if (type === 'media' && fileBuffer) {
+      fileBuffer = await uploadMedia(fileBuffer, 'global_chat');
+    }
+
+    const t3 = Date.now();
     // 1. Broadcast to ALL OTHER clients (sender already has optimistic local copy)
     socket.broadcast.emit('public_message', {
       from, 
@@ -1025,7 +1020,10 @@ io.on('connection', (socket) => {
       timestamp: now,
       messageId: finalMessageId,
       readCount: 0,
-      totalUsers: activeUsers.size
+      totalUsers: activeUsers.size,
+      t0,
+      t1,
+      t3
     });
 
     // 2. Persist to DB in background without blocking socket delivery
@@ -1033,7 +1031,9 @@ io.on('connection', (socket) => {
       'INSERT INTO global_messages (messageId, sender, message, type, mimeType, fileName, fileBuffer, replyTo, timestamp, reactions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [finalMessageId, from, message || null, type || 'text', mimeType || null, fileName || null, fileBuffer || null, replyTo ? JSON.stringify(replyTo) : null, now, '{}'],
       (err) => {
+        const t2 = Date.now();
         if (err) console.error("Error saving global_message:", err);
+        else console.log(`[TIMING SERVER] Global Msg ${finalMessageId} | T1-T0: ${t1 - t0}ms | DB T2-T1: ${t2 - t1}ms`);
       }
     );
   });

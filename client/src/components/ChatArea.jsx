@@ -20,26 +20,43 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
   const recordingTimerRef = useRef(null);
   
   const messagesEndRef = useRef(null);
+  const chatMessagesRef = useRef(null);
   const fileInputRef = useRef(null);
   const emojiPickerRef = useRef(null);
+  const isAtBottomRef = useRef(true);
 
-  const scrollToBottom = (instant = false) => {
+  const handleScroll = () => {
+    if (!chatMessagesRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = chatMessagesRef.current;
+    const distance = scrollHeight - scrollTop - clientHeight;
+    isAtBottomRef.current = distance < 120;
+  };
+
+  const scrollToBottom = (instant = true) => {
     messagesEndRef.current?.scrollIntoView({ behavior: instant ? 'auto' : 'smooth' });
+  };
+
+  const handleImageLoad = () => {
+    if (isAtBottomRef.current) {
+      scrollToBottom(true);
+    }
   };
 
   // Scroll instantly when changing rooms
   useEffect(() => {
+    isAtBottomRef.current = true;
     scrollToBottom(true);
-    // Timeout fallback in case images/DOM takes a moment to render
-    const timer = setTimeout(() => scrollToBottom(true), 100);
+    const timer = setTimeout(() => scrollToBottom(true), 50);
     return () => clearTimeout(timer);
   }, [recipient.username]);
 
-  // Scroll smoothly when new messages arrive
+  // Scroll when new messages arrive, ONLY if user is currently at bottom
   useEffect(() => {
-    scrollToBottom(false);
-    const timer = setTimeout(() => scrollToBottom(false), 100);
-    return () => clearTimeout(timer);
+    if (isAtBottomRef.current) {
+      scrollToBottom(true);
+      const timer = setTimeout(() => scrollToBottom(true), 50);
+      return () => clearTimeout(timer);
+    }
   }, [messages.length]);
 
   // Close emoji picker if clicked outside
@@ -156,6 +173,46 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
       return;
     }
 
+    if (file.type.startsWith('image/') && !file.type.includes('gif')) {
+      const img = new Image();
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        img.onload = function() {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxDim = 1280;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+          onSendMessage({
+            type: 'media',
+            fileBuffer: dataUrl,
+            fileName: file.name.replace(/\.[^/.]+$/, "") + ".jpg",
+            mimeType: 'image/jpeg',
+            replyTo: replyingTo
+          });
+          setReplyingTo(null);
+        };
+        img.src = evt.target.result;
+      };
+      reader.readAsDataURL(file);
+      e.target.value = null;
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = function(event) {
       const dataUrl = event.target.result;
@@ -246,7 +303,8 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
           <img 
             src={src} 
             alt={msg.fileName || 'Image'} 
-            style={{maxWidth: '100%', maxHeight: '320px', borderRadius: '8px', cursor: 'pointer', display: 'block', objectFit: 'contain'}} 
+            onLoad={handleImageLoad}
+            style={{maxWidth: '100%', maxHeight: '320px', minHeight: '120px', borderRadius: '8px', cursor: 'pointer', display: 'block', objectFit: 'contain'}} 
             onClick={() => setFullscreenImage(src)}
           />
         );
@@ -256,7 +314,8 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
             src={src} 
             controls 
             preload="metadata"
-            style={{maxWidth: '100%', maxHeight: '320px', borderRadius: '8px', display: 'block', backgroundColor: '#000'}} 
+            onLoadedData={handleImageLoad}
+            style={{maxWidth: '100%', maxHeight: '320px', minHeight: '120px', borderRadius: '8px', display: 'block', backgroundColor: '#000'}} 
           />
         );
       } else if (mime.startsWith('audio/')) {
@@ -364,7 +423,7 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
         </div>
       </div>
       
-      <div className="chat-messages">
+      <div className="chat-messages" ref={chatMessagesRef} onScroll={handleScroll}>
         <div style={{
            alignSelf: 'center', 
            backgroundColor: 'rgba(255, 255, 255, 0.05)', 

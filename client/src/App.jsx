@@ -157,6 +157,12 @@ const GLOBAL_ROOM = {
 
   useEffect(() => {
     selectedUserRef.current = selectedUser;
+    if (selectedUser && selectedUser.username) {
+      setUnreadCounts(prev => {
+        if (!prev[selectedUser.username]) return prev;
+        return { ...prev, [selectedUser.username]: 0 };
+      });
+    }
   }, [selectedUser]);
 
   useEffect(() => {
@@ -285,16 +291,24 @@ const GLOBAL_ROOM = {
       if (isCancelled) return;
 
       // Synchronization Engine: Sync unread counts, private messages, and global history from DB
+      let lastSyncTime = 0;
       const syncAllMessages = async () => {
         if (!currentUser || !token) return;
+        const now = Date.now();
+        if (now - lastSyncTime < 2000) return;
+        lastSyncTime = now;
+
         try {
           // 1. Fetch server unread counts
           const unreadRes = await fetch('/api/messages/unread-counts', {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           if (unreadRes.ok) {
-            const counts = await unreadRes.json();
-            setUnreadCounts(counts || {});
+            const counts = (await unreadRes.json()) || {};
+            if (selectedUserRef.current && selectedUserRef.current.username) {
+              counts[selectedUserRef.current.username] = 0;
+            }
+            setUnreadCounts(counts);
           }
 
           // 2. Fetch private message sync
@@ -504,7 +518,8 @@ const GLOBAL_ROOM = {
       });
 
       newSocket.on('private_message', async (data) => {
-        const { from, encryptedMessage, timestamp, messageId } = data;
+        const t4 = Date.now();
+        const { from, encryptedMessage, timestamp, messageId, t0, t1, t3 } = data;
         
         let finalMsgObj = {
           id: messageId || (Date.now().toString() + Math.random()),
@@ -573,6 +588,13 @@ const GLOBAL_ROOM = {
           return { ...prev, [from]: [...userChat, finalMsgObj] };
         });
 
+        if (t0 && t1 && t3) {
+          setTimeout(() => {
+            const t5 = Date.now();
+            console.log(`[TIMING RECIPIENT] Private Msg ${messageId} | send_to_backend(T1-T0): ${t1-t0}ms | broadcast_delay(T3-T1): ${t3-t1}ms | network_delivery(T4-T3): ${t4-t3}ms | client_render(T5-T4): ${t5-t4}ms | TOTAL(T5-T0): ${t5-t0}ms`);
+          }, 0);
+        }
+
         let statusToEmit = 'delivered';
         if (selectedUserRef.current && selectedUserRef.current.username === from) {
            statusToEmit = 'read';
@@ -597,6 +619,11 @@ const GLOBAL_ROOM = {
           setUnreadCounts(prev => ({
             ...prev,
             [from]: (prev[from] || 0) + 1
+          }));
+        } else {
+          setUnreadCounts(prev => ({
+            ...prev,
+            [from]: 0
           }));
         }
       });
@@ -627,7 +654,8 @@ const GLOBAL_ROOM = {
       });
 
       newSocket.on('public_message', (data) => {
-        const { from, message, type, mimeType, fileName, fileBuffer, timestamp, messageId, replyTo } = data;
+        const t4 = Date.now();
+        const { from, message, type, mimeType, fileName, fileBuffer, timestamp, messageId, replyTo, t0, t1, t3 } = data;
         
         let finalMsgObj = {
           id: messageId || (Date.now().toString() + Math.random()),
@@ -655,6 +683,13 @@ const GLOBAL_ROOM = {
           return { ...prev, 'global': [...globalChat, finalMsgObj] };
         });
 
+        if (t0 && t1 && t3) {
+          setTimeout(() => {
+            const t5 = Date.now();
+            console.log(`[TIMING RECIPIENT] Public Msg ${messageId} | send_to_backend(T1-T0): ${t1-t0}ms | broadcast_delay(T3-T1): ${t3-t1}ms | network_delivery(T4-T3): ${t4-t3}ms | client_render(T5-T4): ${t5-t4}ms | TOTAL(T5-T0): ${t5-t0}ms`);
+          }, 0);
+        }
+
         // Mark this message as read if we're currently in global chat
         if (selectedUserRef.current && selectedUserRef.current.username === 'global') {
           newSocket.emit('global_message_read', { messageId: finalMsgObj.id, username: currentUser });
@@ -664,6 +699,11 @@ const GLOBAL_ROOM = {
           setUnreadCounts(prev => ({
             ...prev,
             'global': (prev['global'] || 0) + 1
+          }));
+        } else {
+          setUnreadCounts(prev => ({
+            ...prev,
+            'global': 0
           }));
         }
       });
@@ -777,6 +817,7 @@ const GLOBAL_ROOM = {
   const handleSelectUser = (user) => {
     setShowAdminDashboard(false);
     setSelectedUser(user);
+    selectedUserRef.current = user;
     setUnreadCounts(prev => ({ ...prev, [user.username]: 0 }));
     if (isMobile) setMobileShowChat(true);
 
@@ -850,6 +891,7 @@ const GLOBAL_ROOM = {
 
   const handleSendMessage = async (payload) => {
     if (!socket || !selectedUser) return;
+    const t0 = Date.now();
     
     try {
       if (selectedUser.username === 'global') {
@@ -861,7 +903,8 @@ const GLOBAL_ROOM = {
           mimeType: payload.mimeType,
           fileName: payload.fileName,
           replyTo: payload.replyTo,
-          messageId: globalMsgId
+          messageId: globalMsgId,
+          t0
         };
         if (payload.type === 'media') {
            publicPayload.fileBuffer = payload.fileBuffer;
@@ -931,7 +974,8 @@ const GLOBAL_ROOM = {
         messageId: messageId,
         to: selectedUser.username,
         from: currentUser,
-        encryptedMessage: encryptedPayload
+        encryptedMessage: encryptedPayload,
+        t0
       });
 
       const localMsgObj = {

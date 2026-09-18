@@ -209,7 +209,7 @@ function Sidebar({ users, currentUser, myAvatar, onAvatarUpdate, token, onSelect
                     {user.displayName || user.username}
                     {user.username === 'anonim' && <span style={{marginLeft: '4px'}} title="VIP Owner">👑</span>}
                   </span>
-                  {unreadCounts[user.username] > 0 && (
+                  {unreadCounts[user.username] > 0 && selectedUser?.username !== user.username && (
                     <span style={{
                       backgroundColor: 'var(--primary-color)',
                       color: 'white',
