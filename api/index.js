@@ -259,7 +259,7 @@ app.get('/api/users', (req, res) => {
     const formatted = (rows || []).map(r => ({
       id: r.id,
       username: r.username,
-      publicKey: r.publicKey || r.publickey || null,
+      publicKey: (r.publicKey && r.publicKey !== 'ADMIN_PUBLIC_KEY') ? r.publicKey : (r.publickey && r.publickey !== 'ADMIN_PUBLIC_KEY' ? r.publickey : null),
       avatar: r.avatar || null,
       lastSeen: r.lastSeen || r.lastseen || null
     }));

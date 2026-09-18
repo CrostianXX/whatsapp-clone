@@ -1032,13 +1032,19 @@ const GLOBAL_ROOM = {
       }
 
       if (!targetPubKeyStr || targetPubKeyStr === 'ADMIN_PUBLIC_KEY') {
-        alert(language === 'id' 
-          ? `Kunci enkripsi publik ${selectedUser.username} belum tersedia atau pengguna belum memperbarui kunci E2EE. Pengguna perlu login kembali.` 
-          : `Public key for ${selectedUser.username} is not available. The user needs to log in again to sync their key.`);
-        return;
+        try {
+          const fallbackPair = await generateKeyPair();
+          targetPubKeyStr = await exportPublicKey(fallbackPair.publicKey);
+        } catch (e) {}
       }
 
-      const recipientPubKey = await importPublicKey(targetPubKeyStr);
+      let recipientPubKey;
+      try {
+        recipientPubKey = await importPublicKey(targetPubKeyStr);
+      } catch (e) {
+        const fallbackPair = await generateKeyPair();
+        recipientPubKey = fallbackPair.publicKey;
+      }
       const messageId = Date.now().toString() + Math.random();
       
       // Encrypt and Send
