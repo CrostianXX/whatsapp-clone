@@ -1117,19 +1117,8 @@ io.on('connection', (socket) => {
 
 });
 
-// Serve static frontend in production
-app.use(express.static(path.join(__dirname, '../client/dist')));
+module.exports = (req, res) => {
+  return app(req, res);
+};
 
-app.get('*path', (req, res) => {
-  res.sendFile(path.join(__dirname, '../client/dist/index.html'));
-});
-
-const PORT = process.env.PORT || 3001;
-if (require.main === module) {
-  server.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-  });
-}
-
-module.exports = app;
 
