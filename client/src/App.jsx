@@ -1033,9 +1033,25 @@ const GLOBAL_ROOM = {
       try {
         recipientPubKey = await importPublicKey(targetPubKeyStr);
       } catch (e) {
-        alert(`Gagal mengirim pesan: Kunci publik ${selectedUser.username} tidak valid.`);
+        try {
+          const res = await fetch('/api/users');
+          if (res.ok) {
+            const freshUsers = await res.json();
+            const freshRecipient = freshUsers.find(u => u.username === selectedUser.username);
+            if (freshRecipient && freshRecipient.publicKey && freshRecipient.publicKey !== 'ADMIN_PUBLIC_KEY') {
+              recipientPubKey = await importPublicKey(freshRecipient.publicKey);
+              setSelectedUser(freshRecipient);
+              selectedUserRef.current = freshRecipient;
+            }
+          }
+        } catch (retryErr) {}
+      }
+
+      if (!recipientPubKey) {
+        alert(`Gagal mengirim pesan: Kunci publik ${selectedUser.username} belum terdaftar atau tidak valid. Minta ${selectedUser.username} untuk login/refresh halaman.`);
         return;
       }
+
 
       const senderPubKeyStr = localStorage.getItem(`publicKey_${currentUser}`);
       let senderPubKey = null;

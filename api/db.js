@@ -166,16 +166,24 @@ function fallbackRun(sql, params) {
       banStatus: 'active',
       banExpiresAt: null
     });
-  } else if (cleanSql.includes('update users set publickey')) {
-    const pubKey = params[0];
-    const username = params[1];
+  } else if (cleanSql.includes('update users set') && (cleanSql.includes('publickey') || cleanSql.includes('avatar'))) {
+    const username = (params[params.length - 1] || '').toString();
     const user = memoryUsers.get(username);
-    if (user) { user.publicKey = pubKey; memoryUsers.set(username, user); }
-  } else if (cleanSql.includes('update users set avatar')) {
-    const avatar = params[0];
-    const username = params[params.length - 1];
-    const user = memoryUsers.get(username);
-    if (user) { user.avatar = avatar; memoryUsers.set(username, user); }
+    if (user) {
+      if (cleanSql.includes('avatar = coalesce') || cleanSql.includes('avatar = ?')) {
+        const avatar = params[0];
+        const pubKey = params[1];
+        if (avatar) user.avatar = avatar;
+        if (pubKey) user.publicKey = pubKey;
+      } else if (cleanSql.includes('publickey = ?')) {
+        const pubKey = params[0];
+        if (pubKey) user.publicKey = pubKey;
+      } else if (cleanSql.includes('avatar = ?')) {
+        const avatar = params[0];
+        if (avatar) user.avatar = avatar;
+      }
+      memoryUsers.set(username, user);
+    }
   } else if (cleanSql.includes('insert into private_messages')) {
     const msgId = params[0];
     const fromUser = params[1];
