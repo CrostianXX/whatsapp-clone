@@ -231,6 +231,26 @@ function fallbackRun(sql, params) {
       timestamp,
       reactions: '{}'
     });
+  } else if (cleanSql.includes('update private_messages')) {
+    const now = new Date().toISOString();
+    if (cleanSql.includes("status = 'read'")) {
+      const toUser = params[1];
+      const fromUser = params[2];
+      memoryPrivateMessages.forEach(pm => {
+        if ((pm.toUser === toUser && pm.fromUser === fromUser) || (toUser && !fromUser && pm.toUser === toUser)) {
+          pm.status = 'read';
+          pm.readAt = now;
+        }
+      });
+    } else if (cleanSql.includes("status = 'delivered'")) {
+      const toUser = params[0];
+      memoryPrivateMessages.forEach(pm => {
+        if (pm.toUser === toUser && pm.status === 'sent') {
+          pm.status = 'delivered';
+          pm.deliveredAt = now;
+        }
+      });
+    }
   }
 }
 

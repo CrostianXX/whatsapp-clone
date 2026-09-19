@@ -163,13 +163,9 @@ const authenticateUser = (req, res, next) => {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
 
-    // Self-healing: Ensure authenticated user exists in PostgreSQL users table
     if (req.user && req.user.username) {
       const now = new Date().toISOString();
-      db.run(
-        "INSERT INTO users (username, passwordHash, lastSeen) VALUES (?, 'JWT_SESSION', ?) ON CONFLICT (username) DO UPDATE SET lastSeen = EXCLUDED.lastSeen",
-        [req.user.username, now]
-      );
+      db.run("UPDATE users SET lastSeen = ? WHERE username = ?", [now, req.user.username]);
     }
 
     next();

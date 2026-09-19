@@ -659,12 +659,24 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
                         const isDelivered = msg.status === 'delivered' || recipient.status === 'online';
 
                         if (isRead) {
-                          return <CheckCheck size={14} color={isVip ? '#2563EB' : '#53bdeb'} title="Read" />;
+                          return (
+                            <span style={{ display: 'flex', alignItems: 'center' }} title="Sudah Dibaca (Read)">
+                              <CheckCheck size={16} color={isVip ? '#2563EB' : '#00F0FF'} style={{ filter: isVip ? 'none' : 'drop-shadow(0 0 3px #00F0FF)' }} />
+                            </span>
+                          );
                         }
                         if (isDelivered) {
-                          return <CheckCheck size={14} color={isVip ? '#78350F' : 'rgba(255,255,255,0.7)'} title="Delivered" />;
+                          return (
+                            <span style={{ display: 'flex', alignItems: 'center' }} title="Terkirim (Delivered)">
+                              <CheckCheck size={16} color={isVip ? '#78350F' : 'rgba(255,255,255,0.65)'} />
+                            </span>
+                          );
                         }
-                        return <Check size={14} color={isVip ? '#78350F' : 'rgba(255,255,255,0.7)'} title="Sent" />;
+                        return (
+                          <span style={{ display: 'flex', alignItems: 'center' }} title="Terkirim ke Server (Sent)">
+                            <Check size={16} color={isVip ? '#78350F' : 'rgba(255,255,255,0.65)'} />
+                          </span>
+                        );
                       })()
                     )}
                   </span>

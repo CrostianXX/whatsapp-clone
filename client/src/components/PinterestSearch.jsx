@@ -159,10 +159,8 @@ function PinterestSearch({ onClose, onSelectImage }) {
                       backgroundColor: 'var(--bg-secondary)'
                     }}
                     onClick={() => {
-                      if (window.confirm('Kirim gambar ini ke chat?')) {
-                        onSelectImage(img.url);
-                        onClose();
-                      }
+                      onSelectImage(img.url || img.thumb);
+                      onClose();
                     }}
                   >
                     <img 
