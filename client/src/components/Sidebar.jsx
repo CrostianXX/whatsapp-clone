@@ -54,9 +54,12 @@ function Sidebar({ users, currentUser, myAvatar, onAvatarUpdate, token, onSelect
     try {
       const compressedBase64 = await compressImage(file, 200, 200, 0.85);
 
-      // Instant local update
+      // Instant local update & localStorage persistence
       if (onAvatarUpdate) {
         onAvatarUpdate(compressedBase64);
+      }
+      if (currentUser) {
+        localStorage.setItem(`wa_avatar_${currentUser}`, compressedBase64);
       }
 
       const response = await fetch('/api/update-avatar', {
@@ -69,6 +72,11 @@ function Sidebar({ users, currentUser, myAvatar, onAvatarUpdate, token, onSelect
       });
 
       if (!response.ok) throw new Error('Failed to update avatar on server');
+      const data = await response.json();
+      if (data.avatar && currentUser) {
+        localStorage.setItem(`wa_avatar_${currentUser}`, data.avatar);
+        if (onAvatarUpdate) onAvatarUpdate(data.avatar);
+      }
     } catch (err) {
       console.error("[AVATAR UPLOAD ERROR]", err);
       alert('Gagal mengunggah foto profil.');

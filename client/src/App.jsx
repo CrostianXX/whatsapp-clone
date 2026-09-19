@@ -367,7 +367,10 @@ const GLOBAL_ROOM = {
     const mergeUserList = (incomingList) => {
       if (!Array.isArray(incomingList) || incomingList.length === 0) return;
       const me = incomingList.find(u => u.username === currentUser);
-      if (me && me.avatar) setMyAvatar(me.avatar);
+      if (me && me.avatar) {
+        setMyAvatar(me.avatar);
+        if (currentUser) localStorage.setItem(`wa_avatar_${currentUser}`, me.avatar);
+      }
 
       setUsers(prevUsers => {
         const userMap = new Map();
@@ -387,7 +390,7 @@ const GLOBAL_ROOM = {
               ...existing,
               ...u,
               publicKey: u.publicKey || existing.publicKey || null,
-              avatar: u.avatar || existing.avatar || null
+              avatar: u.avatar ? u.avatar : (existing.avatar || null)
             });
           }
         });
