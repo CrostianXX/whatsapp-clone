@@ -208,14 +208,38 @@ app.post('/login', (req, res) => {
   });
 });
 
-// User Authentication Middleware (Requires valid JWT token)
+// User Authentication Middleware (Requires valid JWT token + Ban check)
 const authenticateUser = (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Unauthorized. Token required.' });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded; // { userId, username }
-    next();
+
+    db.get('SELECT banStatus, banExpiresAt FROM users WHERE username = ?', [decoded.username], (err, user) => {
+      if (user) {
+        if (user.banStatus === 'permanently_banned') {
+          return res.status(403).json({ 
+            error: 'BANNED', 
+            banStatus: 'permanently_banned',
+            message: 'Akun Anda telah DIBLOKIR PERMANEN oleh Admin!' 
+          });
+        }
+        if (user.banStatus === 'temp_banned' && user.banExpiresAt) {
+          if (new Date() < new Date(user.banExpiresAt)) {
+            return res.status(403).json({ 
+              error: 'BANNED', 
+              banStatus: 'temp_banned',
+              banExpiresAt: user.banExpiresAt,
+              message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(user.banExpiresAt).toLocaleString('id-ID')}.` 
+            });
+          } else {
+            db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE username = ?", [decoded.username]);
+          }
+        }
+      }
+      next();
+    });
   } catch (error) {
     res.status(401).json({ error: 'Token tidak valid atau kadaluarsa' });
   }
@@ -487,34 +511,51 @@ app.post('/api/admin/kick-session', authenticateAdmin, (req, res) => {
 });
 
 app.post('/api/admin/ban', authenticateAdmin, (req, res) => {
-  const { username, type, durationHours } = req.body;
+  const { username, banType, type, durationHours } = req.body;
+  const targetType = banType || type;
   if (!username) return res.status(400).json({ error: 'Username required' });
+  if (username === 'anonim') return res.status(403).json({ error: 'Tidak dapat memblokir akun Admin' });
   
   let banStatus = 'permanently_banned';
   let banExpiresAt = null;
+  let banMessage = `Akun Anda (${username}) telah DIBLOKIR PERMANEN oleh Admin!`;
   
-  if (type === 'temp') {
+  if (targetType === 'temp' || targetType === 'temporary') {
     banStatus = 'temp_banned';
+    const hours = parseFloat(durationHours) || 24;
     const expires = new Date();
-    expires.setHours(expires.getHours() + (parseFloat(durationHours) || 24));
+    expires.setHours(expires.getHours() + hours);
     banExpiresAt = expires.toISOString();
+    banMessage = `Akun Anda (${username}) DIBLOKIR SEMENTARA oleh Admin selama ${hours} jam (sampai ${expires.toLocaleString('id-ID')}).`;
   }
   
   db.run('UPDATE users SET banStatus = ?, banExpiresAt = ? WHERE username = ?', [banStatus, banExpiresAt, username], function(err) {
     if (err) return res.status(500).json({ error: 'Database error' });
     
-    // Force disconnect if online
-    const userData = activeUsers.get(username);
-    if (userData && userData.socketId) {
-      io.to(userData.socketId).emit('force_disconnect', { message: 'You have been banned by an admin.' });
-      const socket = io.sockets.sockets.get(userData.socketId);
-      if (socket) socket.disconnect(true);
-      activeUsers.delete(username);
+    // Broadcast force_disconnect to ALL sockets of the banned user immediately
+    io.to(username).emit('force_disconnect', {
+      message: banMessage,
+      banStatus: banStatus,
+      banExpiresAt: banExpiresAt
+    });
+
+    if (io.in) {
+      try {
+        io.in(username).disconnectSockets(true);
+      } catch (e) {}
+    }
+    
+    activeUsers.delete(username);
+
+    for (const [sId, sData] of activeSessions.entries()) {
+      if (sData.username === username) {
+        activeSessions.delete(sId);
+      }
     }
     
     if (typeof broadcastUserList === 'function') broadcastUserList();
     
-    res.json({ success: true, message: `User ${username} banned.` });
+    res.json({ success: true, message: `Akun ${username} berhasil diblokir (${banStatus})!` });
   });
 });
 

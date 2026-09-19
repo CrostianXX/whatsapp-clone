@@ -401,9 +401,14 @@ const GLOBAL_ROOM = {
     const mergeUserList = (incomingList) => {
       if (!Array.isArray(incomingList) || incomingList.length === 0) return;
       const me = incomingList.find(u => u.username === currentUser);
-      if (me && me.avatar) {
-        setMyAvatar(me.avatar);
-        if (currentUser) localStorage.setItem(`wa_avatar_${currentUser}`, me.avatar);
+      if (me) {
+        if (me.avatar) {
+          setMyAvatar(me.avatar);
+          if (currentUser) localStorage.setItem(`wa_avatar_${currentUser}`, me.avatar);
+        } else if (currentUser) {
+          const localAvatar = localStorage.getItem(`wa_avatar_${currentUser}`);
+          if (localAvatar) setMyAvatar(localAvatar);
+        }
       }
 
       setUsers(prevUsers => {
@@ -420,11 +425,18 @@ const GLOBAL_ROOM = {
         incomingList.forEach(u => {
           if (u.username && u.username !== currentUser && u.username !== 'global' && !u.username.startsWith('2026-') && !u.username.includes('T')) {
             const existing = userMap.get(u.username) || {};
+            const cachedAvatar = localStorage.getItem(`wa_avatar_${u.username}`);
+            const finalAvatar = u.avatar || existing.avatar || cachedAvatar || null;
+
+            if (finalAvatar) {
+              try { localStorage.setItem(`wa_avatar_${u.username}`, finalAvatar); } catch (e) {}
+            }
+
             userMap.set(u.username, {
               ...existing,
               ...u,
               publicKey: u.publicKey || existing.publicKey || null,
-              avatar: u.avatar ? u.avatar : (existing.avatar || null)
+              avatar: finalAvatar
             });
           }
         });
@@ -443,9 +455,12 @@ const GLOBAL_ROOM = {
         const fresh = incomingList.find(u => u.username === selectedUserRef.current.username);
         if (fresh) {
           const cur = selectedUserRef.current;
-          if (cur.status !== fresh.status || cur.avatar !== fresh.avatar || cur.publicKey !== fresh.publicKey || cur.lastSeen !== fresh.lastSeen) {
-            setSelectedUser(prev => prev ? { ...prev, ...fresh } : fresh);
-            selectedUserRef.current = { ...selectedUserRef.current, ...fresh };
+          const cachedAvatar = localStorage.getItem(`wa_avatar_${fresh.username}`);
+          const finalAvatar = fresh.avatar || cur.avatar || cachedAvatar || null;
+          if (cur.status !== fresh.status || cur.avatar !== finalAvatar || cur.publicKey !== fresh.publicKey || cur.lastSeen !== fresh.lastSeen) {
+            const mergedUser = { ...cur, ...fresh, avatar: finalAvatar };
+            setSelectedUser(mergedUser);
+            selectedUserRef.current = mergedUser;
           }
         }
       }
@@ -455,10 +470,15 @@ const GLOBAL_ROOM = {
       try {
         const res = await fetch('/api/users');
         if (res.status === 401 || res.status === 403) {
+          const errData = await res.json().catch(() => ({}));
+          if (errData.message || res.status === 403) {
+            alert(errData.message || 'Akun Anda telah diblokir.');
+          }
           localStorage.removeItem('wa_username');
           localStorage.removeItem('wa_token');
           setCurrentUser(null);
           setToken(null);
+          window.location.reload();
           return;
         }
         if (res.ok) {
@@ -512,13 +532,17 @@ const GLOBAL_ROOM = {
         }
 
         if (pubKeyStr && token) {
+          const currentLocalAvatar = localStorage.getItem(`wa_avatar_${currentUser}`) || null;
           fetch('/api/user/profile', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify({ publicKey: pubKeyStr })
+            body: JSON.stringify({
+              publicKey: pubKeyStr,
+              avatar: currentLocalAvatar
+            })
           }).catch(() => {});
         }
       } catch (e) {

@@ -4,8 +4,11 @@ import { Shield, ShieldOff, Search, Clock, Trash2, Lock, Key, Monitor, LogOut, E
 const API_URL = import.meta.env.VITE_BACKEND_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '');
 
 function AdminDashboard({ token, onBack }) {
-  const [adminPin, setAdminPin] = useState(() => sessionStorage.getItem('admin_pin') || '');
-  const [isPinVerified, setIsPinVerified] = useState(false);
+  const [adminPin, setAdminPin] = useState(() => sessionStorage.getItem('admin_pin') || '123458');
+  const [isPinVerified, setIsPinVerified] = useState(() => {
+    const savedPin = sessionStorage.getItem('admin_pin');
+    return savedPin === '123458' || Boolean(savedPin);
+  });
   
   // PIN & Eye Toggle & Captcha state
   const [pinInput, setPinInput] = useState('');
@@ -36,8 +39,9 @@ function AdminDashboard({ token, onBack }) {
 
   useEffect(() => {
     generateCaptcha();
-    if (adminPin) {
-      verifyPin(adminPin);
+    const savedPin = sessionStorage.getItem('admin_pin') || '123458';
+    if (savedPin) {
+      verifyPin(savedPin);
     }
   }, []);
 

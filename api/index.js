@@ -167,9 +167,34 @@ const authenticateUser = (req, res, next) => {
     if (req.user && req.user.username) {
       const now = new Date().toISOString();
       db.run("UPDATE users SET lastSeen = ? WHERE username = ?", [now, req.user.username]);
+      
+      db.get('SELECT banStatus, banExpiresAt FROM users WHERE username = ?', [req.user.username], (err, user) => {
+        if (user) {
+          if (user.banStatus === 'permanently_banned') {
+            return res.status(403).json({ 
+              error: 'BANNED', 
+              banStatus: 'permanently_banned',
+              message: 'Akun Anda telah DIBLOKIR PERMANEN oleh Admin!' 
+            });
+          }
+          if (user.banStatus === 'temp_banned' && user.banExpiresAt) {
+            if (new Date() < new Date(user.banExpiresAt)) {
+              return res.status(403).json({ 
+                error: 'BANNED', 
+                banStatus: 'temp_banned',
+                banExpiresAt: user.banExpiresAt,
+                message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(user.banExpiresAt).toLocaleString('id-ID')}.` 
+              });
+            } else {
+              db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE username = ?", [req.user.username]);
+            }
+          }
+        }
+        next();
+      });
+    } else {
+      next();
     }
-
-    next();
   } catch (error) {
     res.status(401).json({ error: 'Token tidak valid atau kadaluarsa' });
   }
