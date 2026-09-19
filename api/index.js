@@ -162,6 +162,16 @@ const authenticateUser = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
+
+    // Self-healing: Ensure authenticated user exists in PostgreSQL users table
+    if (req.user && req.user.username) {
+      const now = new Date().toISOString();
+      db.run(
+        "INSERT INTO users (username, passwordHash, lastSeen) VALUES (?, 'JWT_SESSION', ?) ON CONFLICT (username) DO UPDATE SET lastSeen = EXCLUDED.lastSeen",
+        [req.user.username, now]
+      );
+    }
+
     next();
   } catch (error) {
     res.status(401).json({ error: 'Token tidak valid atau kadaluarsa' });
@@ -253,7 +263,7 @@ app.get('/api/messages/unread-counts', authenticateUser, (req, res) => {
   const unreadMap = {};
 
   db.all(
-    'SELECT fromUser, COUNT(*) as count FROM private_messages WHERE toUser = ? AND status != "read" GROUP BY fromUser',
+    "SELECT fromUser, COUNT(*) as count FROM private_messages WHERE toUser = ? AND status != 'read' GROUP BY fromUser",
     [username],
     (err, privateRows) => {
       if (!err && privateRows) {
@@ -310,7 +320,7 @@ app.post('/api/messages/read', authenticateUser, (req, res) => {
     }
   } else {
     db.run(
-      'UPDATE private_messages SET status = "read", readAt = ? WHERE toUser = ? AND fromUser = ? AND status != "read"',
+      "UPDATE private_messages SET status = 'read', readAt = ? WHERE toUser = ? AND fromUser = ? AND status != 'read'",
       [now, username, room],
       function(err) {
         if (err) return res.status(500).json({ error: 'Database error' });
@@ -404,23 +414,24 @@ app.post(['/api/user/profile', '/api/update-avatar'], authenticateUser, async (r
       finalAvatar = await uploadMedia(avatar, 'avatars');
     }
 
-    if (publicKey) {
-      db.run('UPDATE users SET avatar = COALESCE(?, avatar), publicKey = ? WHERE username = ?', [finalAvatar, publicKey, username], (err) => {
+    const now = new Date().toISOString();
+
+    db.run(
+      `INSERT INTO users (username, passwordHash, publicKey, avatar, lastSeen) 
+       VALUES (?, 'JWT_SESSION', ?, ?, ?) 
+       ON CONFLICT (username) DO UPDATE 
+       SET publicKey = COALESCE(EXCLUDED.publicKey, users.publicKey), 
+           avatar = COALESCE(EXCLUDED.avatar, users.avatar), 
+           lastSeen = EXCLUDED.lastSeen`,
+      [username, publicKey || null, finalAvatar, now],
+      (err) => {
         if (err) {
           console.error('[DB ERROR] Failed to update profile:', err);
           return res.status(500).json({ error: 'Failed to update profile' });
         }
         res.json({ success: true, avatar: finalAvatar, publicKey });
-      });
-    } else {
-      db.run('UPDATE users SET avatar = ? WHERE username = ?', [finalAvatar, username], (err) => {
-        if (err) {
-          console.error('[DB ERROR] Failed to update avatar:', err);
-          return res.status(500).json({ error: 'Failed to update avatar' });
-        }
-        res.json({ success: true, avatar: finalAvatar });
-      });
-    }
+      }
+    );
   } catch (e) {
     console.error('[PROFILE UPDATE ERROR]', e);
     res.status(500).json({ error: 'Upload failed' });
