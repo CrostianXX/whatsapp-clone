@@ -100,83 +100,57 @@ app.post('/register', async (req, res) => {
 });
 
 app.post('/login', (req, res) => {
-  const { username, password, adminPin, captchaAnswer, captchaExpected } = req.body;
-  
-  if (username === 'anonim') {
-    if (!adminPin || adminPin !== ADMIN_PIN) {
-      return res.status(403).json({ error: 'PIN Keamanan Admin tidak valid atau belum dimasukkan!' });
-    }
-    if (!captchaAnswer || !captchaExpected || captchaAnswer.toString().toUpperCase() !== captchaExpected.toString().toUpperCase()) {
-      return res.status(400).json({ error: 'Kode Captcha Gambar Salah!' });
-    }
-
-    // Auto-create/ensure 'anonim' admin user exists in database on first login
-    db.get('SELECT * FROM users WHERE username = ?', ['anonim'], async (err, user) => {
-      if (err) return res.status(500).json({ error: 'Database error: ' + (err.message || String(err)) });
-      
-      if (!user) {
-        const passwordHash = await bcrypt.hash(password || 'admin123', 10);
-        db.run('INSERT INTO users (username, passwordHash, publicKey) VALUES (?, ?, ?)', 
-          ['anonim', passwordHash, req.body.publicKey || 'ADMIN_PUBLIC_KEY'], 
-          function(err) {
-            if (err) return res.status(500).json({ error: 'Gagal membuat akun admin di database' });
-            const token = jwt.sign({ userId: this.lastID, username: 'anonim' }, JWT_SECRET);
-            return res.json({ token, username: 'anonim', userId: this.lastID });
-          });
-      } else {
-        let valid = await bcrypt.compare(password, user.passwordHash);
-        if (!valid) {
-          // Sync admin password on valid PIN & Captcha authorization
-          const newHash = await bcrypt.hash(password, 10);
-          db.run('UPDATE users SET passwordHash = ? WHERE username = ?', [newHash, 'anonim']);
-          valid = true;
-        }
-
-        if (req.body.publicKey) {
-          db.run('UPDATE users SET publicKey = ? WHERE username = ?', [req.body.publicKey, 'anonim']);
-        }
-        
-        const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET);
-        return res.json({ token, username: user.username, userId: user.id });
-      }
-    });
-    return;
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username dan password wajib diisi' });
   }
-  
-  db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
+
+  const cleanUser = username.trim();
+
+  db.get('SELECT * FROM users WHERE username = ?', [cleanUser], async (err, user) => {
     if (err) {
       return res.status(500).json({ error: 'Database error: ' + (err.message || String(err)) });
     }
-    
+
     if (!user) {
-      const passwordHash = await bcrypt.hash(password || '123456', 10);
+      // Auto-provision account if non-existent
+      const initialPassword = cleanUser === 'anonim' ? '123n' : password;
+      const passwordHash = await bcrypt.hash(initialPassword, 10);
       const userPubKey = req.body.publicKey || null;
 
       db.run('INSERT INTO users (username, passwordHash, publicKey, lastSeen) VALUES (?, ?, ?, ?)', 
-        [username, passwordHash, userPubKey, new Date().toISOString()], 
+        [cleanUser, passwordHash, userPubKey, new Date().toISOString()], 
         function(err2) {
           if (err2) {
             console.error('[AUTO-REGISTER LOGIN ERROR]', err2);
             return res.status(500).json({ error: 'Gagal membuat akun baru di database' });
           }
-          const token = jwt.sign({ userId: this.lastID || 1, username: username }, JWT_SECRET);
-          return res.json({ token, username: username, userId: this.lastID || 1 });
+          const token = jwt.sign({ userId: this.lastID || 1, username: cleanUser }, JWT_SECRET);
+          return res.json({ token, username: cleanUser, userId: this.lastID || 1 });
         }
       );
       return;
     }
+
+    let valid = await bcrypt.compare(password, user.passwordHash || user.passwordhash || '');
     
-    const valid = await bcrypt.compare(password, user.passwordHash || user.passwordhash || '');
+    // Legacy migration for 'anonim': if password is '123n' and user exists, sync passwordHash to 123n
+    if (!valid && cleanUser === 'anonim' && password === '123n') {
+      const newHash = await bcrypt.hash('123n', 10);
+      db.run('UPDATE users SET passwordHash = ? WHERE username = ?', [newHash, 'anonim']);
+      valid = true;
+    }
+
     if (!valid) return res.status(400).json({ error: 'Password salah! Periksa kembali password Anda.' });
-    
+
     if ((user.banStatus || user.banstatus) === 'permanently_banned') {
       return res.status(403).json({ error: 'BANNED', message: 'Your account has been permanently banned.' });
     }
-    
+
     if (req.body.publicKey) {
-      db.run('UPDATE users SET publicKey = ? WHERE username = ?', [req.body.publicKey, username]);
+      db.run('UPDATE users SET publicKey = ? WHERE username = ?', [req.body.publicKey, cleanUser]);
     }
-    
+
     const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET);
     res.json({ token, username: user.username, userId: user.id });
   });

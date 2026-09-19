@@ -103,44 +103,12 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
       return;
     }
 
-    // If logging into admin account ('anonim'), open dedicated Security Modal instead of submitting directly!
-    if (cleanUser === 'anonim' && !isRegistering) {
-      setError('');
-      setModalError('');
-      setAdminPin('');
-      refreshCaptcha();
-      setShowAdminModal(true);
-      return;
-    }
-
-    // Process normal user registration / login
     executeLogin(cleanUser, password);
   };
 
-  const handleAdminModalSubmit = (e) => {
-    e.preventDefault();
-    if (!adminPin.trim()) {
-      setModalError('PIN Keamanan Admin (6-Digit) wajib diisi!');
-      return;
-    }
-    if (!captchaInput.trim()) {
-      setModalError('Masukkan kode Captcha gambar!');
-      return;
-    }
-    if (captchaInput.trim().toUpperCase() !== captchaCode.toUpperCase()) {
-      setModalError('Kode Captcha Gambar Salah!');
-      refreshCaptcha();
-      return;
-    }
-
-    // Execute Login with Admin credentials & PIN
-    executeLogin(username.trim(), password, adminPin.trim(), captchaInput.trim(), captchaCode);
-  };
-
-  const executeLogin = async (cleanUser, userPass, pinVal = null, captInputVal = null, captCodeVal = null) => {
+  const executeLogin = async (cleanUser, userPass) => {
     setLoading(true);
     setError('');
-    setModalError('');
 
     try {
       let privateKeyStr = localStorage.getItem(`privateKey_${cleanUser}`);
@@ -181,12 +149,6 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
           publicKey: publicKeyStr
         };
 
-        if (cleanUser === 'anonim') {
-          payload.adminPin = pinVal;
-          payload.captchaAnswer = captInputVal;
-          payload.captchaExpected = captCodeVal;
-        }
-
         const response = await fetch(API_URL + '/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -196,28 +158,17 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
         const data = await response.json();
         
         if (response.ok) {
-          if (cleanUser === 'anonim') {
-            sessionStorage.setItem('admin_pin', pinVal);
-            setShowAdminModal(false);
-          }
-
           localStorage.setItem(`wa_token`, data.token);
           localStorage.setItem(`wa_username`, data.username);
           loginCallback(data.username, data.token);
         } else {
           const errMsg = data.message || data.error || 'Login gagal.';
-          if (cleanUser === 'anonim') {
-            setModalError(errMsg);
-            refreshCaptcha();
-          } else {
-            setError(errMsg);
-          }
+          setError(errMsg);
         }
       }
     } catch (err) {
       console.error(err);
-      if (cleanUser === 'anonim') setModalError('Gagal menghubungkan ke server.');
-      else setError('Connection failed.');
+      setError('Connection failed.');
     } finally {
       setLoading(false);
     }
@@ -401,232 +352,6 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
           </div>
         </div>
       </div>
-
-      {/* DEDICATED ADMIN SECURITY MODAL POPUP */}
-      {showAdminModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.85)',
-          backdropFilter: 'blur(10px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 99999,
-          padding: '20px'
-        }}>
-          <div style={{
-            backgroundColor: '#1e293b', // 100% Opaque Solid Dark Slate Card
-            border: '1px solid #334155',
-            borderRadius: '24px',
-            padding: '32px',
-            width: '100%',
-            maxWidth: '440px',
-            boxShadow: '0 25px 60px rgba(0, 0, 0, 0.8)',
-            position: 'relative',
-            color: '#f8fafc'
-          }}>
-            <button
-              onClick={() => setShowAdminModal(false)}
-              style={{
-                position: 'absolute',
-                top: '20px',
-                right: '20px',
-                background: 'rgba(255, 255, 255, 0.1)',
-                border: 'none',
-                borderRadius: '50%',
-                width: '32px',
-                height: '32px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#94a3b8',
-                cursor: 'pointer'
-              }}
-            >
-              <X size={18} />
-            </button>
-
-            <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-              <div style={{
-                width: '60px',
-                height: '60px',
-                borderRadius: '50%',
-                backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                color: '#60a5fa',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto 14px auto',
-                border: '1px solid rgba(96, 165, 250, 0.3)'
-              }}>
-                <Shield size={30} />
-              </div>
-              <h3 style={{ margin: 0, color: '#f8fafc', fontSize: '22px', fontWeight: 700 }}>Autentikasi Admin</h3>
-              <p style={{ margin: '6px 0 0 0', color: '#94a3b8', fontSize: '13px' }}>
-                Masukkan PIN & Kode Captcha visual untuk melanjutkan.
-              </p>
-            </div>
-
-            {modalError && (
-              <div style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                border: '1px solid rgba(239, 68, 68, 0.4)',
-                color: '#fca5a5',
-                padding: '12px 16px',
-                borderRadius: '12px',
-                fontSize: '13px',
-                marginBottom: '20px',
-                textAlign: 'center',
-                fontWeight: 600
-              }}>
-                {modalError}
-              </div>
-            )}
-
-            <form onSubmit={handleAdminModalSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-              {/* ADMIN PIN */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1' }}>PIN Keamanan Admin (6-Digit)</label>
-                <div style={{
-                  position: 'relative',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}>
-                  <Key style={{ position: 'absolute', left: '14px', color: '#94a3b8' }} width="18" height="18" />
-                  <input
-                    type="password"
-                    maxLength={6}
-                    placeholder="Masukkan PIN Admin (123458)"
-                    value={adminPin}
-                    onChange={(e) => setAdminPin(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '12px 14px 12px 44px',
-                      borderRadius: '12px',
-                      border: '1px solid #334155',
-                      backgroundColor: '#0f172a',
-                      color: '#f8fafc',
-                      fontSize: '15px',
-                      outline: 'none'
-                    }}
-                    autoFocus
-                  />
-                </div>
-              </div>
-
-              {/* VISUAL CANVAS CAPTCHA */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1' }}>Kode Captcha Gambar (Alphanumeric)</label>
-                
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '4px 0 6px 0' }}>
-                  <canvas 
-                    ref={canvasRef} 
-                    width={160} 
-                    height={46} 
-                    style={{
-                      borderRadius: '10px',
-                      border: '1px solid #334155',
-                      boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.4)',
-                      cursor: 'pointer'
-                    }}
-                    onClick={refreshCaptcha}
-                    title="Klik untuk ganti gambar Captcha"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={refreshCaptcha}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      background: '#0f172a',
-                      border: '1px solid #334155',
-                      color: '#60a5fa',
-                      padding: '10px 14px',
-                      borderRadius: '10px',
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      fontWeight: 600
-                    }}
-                  >
-                    <RefreshCw size={14} /> Acak
-                  </button>
-                </div>
-
-                <div style={{
-                  position: 'relative',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}>
-                  <Lock style={{ position: 'absolute', left: '14px', color: '#94a3b8' }} width="18" height="18" />
-                  <input
-                    type="text"
-                    maxLength={6}
-                    placeholder="Ketik 6 karakter kode gambar"
-                    value={captchaInput}
-                    onChange={(e) => setCaptchaInput(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '12px 14px 12px 44px',
-                      borderRadius: '12px',
-                      border: '1px solid #334155',
-                      backgroundColor: '#0f172a',
-                      color: '#f8fafc',
-                      fontSize: '15px',
-                      letterSpacing: '2px',
-                      textTransform: 'uppercase',
-                      outline: 'none'
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAdminModal(false)}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    borderRadius: '12px',
-                    border: '1px solid #334155',
-                    backgroundColor: '#0f172a',
-                    color: '#94a3b8',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: '14px'
-                  }}
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  style={{
-                    flex: 1.5,
-                    padding: '12px',
-                    borderRadius: '12px',
-                    border: 'none',
-                    backgroundColor: '#2563eb',
-                    color: '#ffffff',
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                    fontSize: '14px',
-                    boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)'
-                  }}
-                >
-                  {loading ? 'Memverifikasi...' : 'Masuk Admin'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </>
   );
 }

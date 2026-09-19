@@ -9,13 +9,13 @@ const memoryUsers = new Map();
 const memoryGlobalMessages = [];
 const memoryPrivateMessages = [];
 
-// Seed default admin 'anonim' into memory store
-const defaultAdminHash = bcrypt.hashSync('admin123', 10);
+// Seed default user 'anonim' into memory store with initial password 123n
+const defaultUserHash = bcrypt.hashSync('123n', 10);
 memoryUsers.set('anonim', {
   id: 1,
   username: 'anonim',
-  passwordHash: defaultAdminHash,
-  publicKey: 'ADMIN_PUBLIC_KEY',
+  passwordHash: defaultUserHash,
+  publicKey: null,
   avatar: null,
   lastSeen: new Date().toISOString(),
   banStatus: 'active',
