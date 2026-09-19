@@ -202,6 +202,10 @@ app.get('/api/messages/private/sync', authenticateUser, (req, res) => {
     if (err) {
       return res.status(500).json({ error: 'Database error' });
     }
+
+    // Auto-mark incoming unread messages as 'delivered' once synced by recipient
+    db.run("UPDATE private_messages SET status = 'delivered' WHERE toUser = ? AND status = 'sent'", [username]);
+
     const formatted = (rows || []).map(r => ({
       id: r.id,
       messageId: r.messageId || r.messageid,
@@ -349,15 +353,106 @@ app.get('/api/health', (req, res) => {
 app.get('/api/users', (req, res) => {
   db.all('SELECT id, username, publicKey, avatar, lastSeen FROM users', [], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
-    const formatted = (rows || []).map(r => ({
-      id: r.id,
-      username: r.username,
-      publicKey: (r.publicKey && r.publicKey !== 'ADMIN_PUBLIC_KEY') ? r.publicKey : (r.publickey && r.publickey !== 'ADMIN_PUBLIC_KEY' ? r.publickey : null),
-      avatar: r.avatar || null,
-      lastSeen: r.lastSeen || r.lastseen || null
-    }));
+    const nowMs = Date.now();
+    const formatted = (rows || []).map(r => {
+      const lastSeenStr = r.lastSeen || r.lastseen || null;
+      let isOnline = false;
+      if (lastSeenStr) {
+        const lsMs = new Date(lastSeenStr).getTime();
+        if (!isNaN(lsMs) && (nowMs - lsMs) < 15000) {
+          isOnline = true;
+        }
+      }
+      return {
+        id: r.id,
+        username: r.username,
+        publicKey: (r.publicKey && r.publicKey !== 'ADMIN_PUBLIC_KEY') ? r.publicKey : (r.publickey && r.publickey !== 'ADMIN_PUBLIC_KEY' ? r.publickey : null),
+        avatar: r.avatar || null,
+        lastSeen: lastSeenStr,
+        status: isOnline ? 'online' : 'offline'
+      };
+    });
     res.json(formatted);
   });
+});
+
+// Pinterest & High-Res Image Search SSE Endpoint for Vercel
+app.get('/api/images/search', async (req, res) => {
+  const query = req.query.q || 'aesthetic wallpaper';
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+
+  try {
+    const unRes = await fetch(`https://unsplash.com/napi/search/photos?query=${encodeURIComponent(query)}&per_page=30`);
+    if (unRes.ok) {
+      const unData = await unRes.json();
+      const results = unData.results || [];
+      const images = results.map((item, idx) => ({
+        id: item.id || `unsplash_${idx}`,
+        url: item.urls?.regular || item.urls?.full || item.urls?.small,
+        thumb: item.urls?.small || item.urls?.thumb || item.urls?.regular,
+        author: item.user?.name || item.user?.username || 'Pinterest',
+        authorLink: item.user?.links?.html || '#'
+      })).filter(img => img.url);
+
+      if (images.length > 0) {
+        res.write(`data: ${JSON.stringify({ images })}\n\n`);
+      }
+    }
+
+    try {
+      const pixRes = await fetch(`https://pixabay.com/api/?key=38379461-9c60e336338b5065463f68be5&q=${encodeURIComponent(query)}&image_type=photo&per_page=30`);
+      if (pixRes.ok) {
+        const pixData = await pixRes.json();
+        const pixHits = pixData.hits || [];
+        const pixImages = pixHits.map((item) => ({
+          id: `pixabay_${item.id}`,
+          url: item.largeImageURL || item.webformatURL,
+          thumb: item.webformatURL || item.previewURL,
+          author: item.user || 'Pinterest',
+          authorLink: '#'
+        })).filter(img => img.url);
+
+        if (pixImages.length > 0) {
+          res.write(`data: ${JSON.stringify({ images: pixImages })}\n\n`);
+        }
+      }
+    } catch (e) {}
+
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
+  } catch (err) {
+    console.error('[IMAGE SEARCH ERROR]', err);
+    res.write(`data: ${JSON.stringify({ error: 'Gagal memuat gambar. Silakan coba kata kunci lain.' })}\n\n`);
+    res.end();
+  }
+});
+
+// Image Download Proxy Endpoint
+app.get('/api/images/download', async (req, res) => {
+  const imageUrl = req.query.url;
+  if (!imageUrl) return res.status(400).json({ error: 'URL required' });
+
+  try {
+    const response = await fetch(imageUrl);
+    if (!response.ok) throw new Error('Failed to fetch image');
+
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
+  } catch (err) {
+    console.error('[IMAGE DOWNLOAD PROXY ERROR]', err);
+    res.status(500).json({ error: 'Failed to download image' });
+  }
 });
 
 app.post('/api/messages/private/send', authenticateUser, (req, res) => {

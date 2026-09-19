@@ -165,8 +165,18 @@ const GLOBAL_ROOM = {
         if (!prev[selectedUser.username]) return prev;
         return { ...prev, [selectedUser.username]: 0 };
       });
+      if (token && selectedUser.username !== 'global') {
+        fetch('/api/messages/read', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ room: selectedUser.username })
+        }).catch(err => console.error("Read receipt error:", err));
+      }
     }
-  }, [selectedUser]);
+  }, [selectedUser, token]);
 
   useEffect(() => {
     const savedUser = localStorage.getItem('wa_username');
@@ -558,7 +568,7 @@ const GLOBAL_ROOM = {
                         text: (m.text && m.text !== '[Sent Message]' && m.text !== '[Encrypted Message]') ? m.text : (existing.text || m.text),
                         blob: existing.blob || m.blob,
                         mediaUrl: existing.mediaUrl || m.mediaUrl,
-                        status: m.status || existing.status
+                        status: (m.status === 'read' || m.status === 'delivered') ? m.status : (existing.status || m.status)
                       });
                     } else {
                       map.set(m.id, m);
@@ -567,6 +577,19 @@ const GLOBAL_ROOM = {
                   const sorted = Array.from(map.values()).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
                   updated[peer] = sorted;
                 }
+
+                // If currently viewing this peer's room, trigger read receipt
+                if (selectedUserRef.current && selectedUserRef.current.username && decryptedPrivateMsgs[selectedUserRef.current.username]) {
+                  fetch('/api/messages/read', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ room: selectedUserRef.current.username })
+                  }).catch(err => {});
+                }
+
                 return updated;
               });
             }
