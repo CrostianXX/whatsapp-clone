@@ -472,15 +472,13 @@ const GLOBAL_ROOM = {
         const res = await fetch('/api/users');
         if (res.status === 401 || res.status === 403) {
           const errData = await res.json().catch(() => ({}));
-          if (errData.message || res.status === 403) {
-            alert(errData.message || 'Akun Anda telah diblokir.');
+          if (errData.error === 'BANNED' || errData.message || res.status === 403) {
+            setBannedNotice(errData.message ? errData : { message: errData.message || 'Akun Anda telah DIBLOKIR oleh Admin!' });
+            localStorage.removeItem('wa_username');
+            localStorage.removeItem('wa_token');
+            sessionStorage.clear();
+            return;
           }
-          localStorage.removeItem('wa_username');
-          localStorage.removeItem('wa_token');
-          setCurrentUser(null);
-          setToken(null);
-          window.location.reload();
-          return;
         }
         if (res.ok) {
           const userList = await res.json();
@@ -568,6 +566,18 @@ const GLOBAL_ROOM = {
             fetch('/api/messages/global/sync', { headers: { 'Authorization': `Bearer ${token}` } }).catch(() => null)
           ]);
 
+          // Check if any REST endpoint returned HTTP 403 BANNED status
+          for (const res of [unreadRes, pSyncRes, gSyncRes]) {
+            if (res && res.status === 403) {
+              const errData = await res.json().catch(() => ({}));
+              setBannedNotice(errData.message ? errData : { message: errData.message || 'Akun Anda telah DIBLOKIR oleh Admin!' });
+              localStorage.removeItem('wa_username');
+              localStorage.removeItem('wa_token');
+              sessionStorage.clear();
+              return;
+            }
+          }
+
           if (unreadRes && unreadRes.ok) {
             const counts = (await unreadRes.json()) || {};
             setUnreadCounts(prev => {
@@ -584,12 +594,16 @@ const GLOBAL_ROOM = {
             if (privateRows && privateRows.length > 0) {
               const decryptedPrivateMsgs = {};
               for (const pm of privateRows) {
-                const peer = pm.fromUser === currentUser ? pm.toUser : pm.fromUser;
+                const pmFrom = pm.fromUser || pm.fromuser;
+                const pmTo = pm.toUser || pm.touser;
+                const peer = pmFrom === currentUser ? pmTo : pmFrom;
+                if (!peer) continue;
+
                 if (!decryptedPrivateMsgs[peer]) decryptedPrivateMsgs[peer] = [];
 
-                const mId = pm.messageId || pm.id;
+                const mId = pm.messageId || pm.messageid || pm.id;
                 const existingList = chatsRef.current ? (chatsRef.current[peer] || []) : [];
-                const existingMsg = existingList.find(m => m.id === mId);
+                const existingMsg = existingList.find(m => m.id === mId || m.id === pm.id || m.id === (pm.messageId || pm.messageid));
 
                 const isAlreadyDecrypted = existingMsg && (
                   existingMsg.type === 'media' ||

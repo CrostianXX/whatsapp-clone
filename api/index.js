@@ -165,37 +165,72 @@ const authenticateUser = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
+    const username = decoded.username;
 
-    if (req.user && req.user.username) {
-      const banInfo = bannedUsersMap.get(req.user.username);
-      if (banInfo) {
-        if (banInfo.banStatus === 'permanently_banned') {
+    if (!username) return next();
+
+    // 1. Check in-memory ban map first (0ms)
+    const banInfo = bannedUsersMap.get(username) || bannedUsersMap.get(username.toLowerCase());
+    if (banInfo) {
+      if (banInfo.banStatus === 'permanently_banned') {
+        return res.status(403).json({ 
+          error: 'BANNED', 
+          banStatus: 'permanently_banned',
+          message: 'Akun Anda telah DIBLOKIR PERMANEN oleh Admin!' 
+        });
+      }
+      if (banInfo.banStatus === 'temp_banned' && banInfo.banExpiresAt) {
+        if (new Date() < new Date(banInfo.banExpiresAt)) {
+          return res.status(403).json({ 
+            error: 'BANNED', 
+            banStatus: 'temp_banned',
+            banExpiresAt: banInfo.banExpiresAt,
+            message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(banInfo.banExpiresAt).toLocaleString('id-ID')}.` 
+          });
+        } else {
+          bannedUsersMap.delete(username);
+          bannedUsersMap.delete(username.toLowerCase());
+          db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE LOWER(username) = LOWER(?)", [username]);
+        }
+      }
+    }
+
+    // 2. DB fallback check to catch ban status if cache missed
+    db.get('SELECT banStatus, banExpiresAt FROM users WHERE LOWER(username) = LOWER(?)', [username], (err, user) => {
+      if (user) {
+        const bStatus = user.banStatus || user.banstatus;
+        const bExpires = user.banExpiresAt || user.banexpiresat;
+
+        if (bStatus === 'permanently_banned') {
+          bannedUsersMap.set(username, { banStatus: bStatus, banExpiresAt: bExpires });
+          bannedUsersMap.set(username.toLowerCase(), { banStatus: bStatus, banExpiresAt: bExpires });
           return res.status(403).json({ 
             error: 'BANNED', 
             banStatus: 'permanently_banned',
             message: 'Akun Anda telah DIBLOKIR PERMANEN oleh Admin!' 
           });
         }
-        if (banInfo.banStatus === 'temp_banned' && banInfo.banExpiresAt) {
-          if (new Date() < new Date(banInfo.banExpiresAt)) {
+
+        if (bStatus === 'temp_banned' && bExpires) {
+          if (new Date() < new Date(bExpires)) {
+            bannedUsersMap.set(username, { banStatus: bStatus, banExpiresAt: bExpires });
+            bannedUsersMap.set(username.toLowerCase(), { banStatus: bStatus, banExpiresAt: bExpires });
             return res.status(403).json({ 
               error: 'BANNED', 
               banStatus: 'temp_banned',
-              banExpiresAt: banInfo.banExpiresAt,
-              message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(banInfo.banExpiresAt).toLocaleString('id-ID')}.` 
+              banExpiresAt: bExpires,
+              message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(bExpires).toLocaleString('id-ID')}.` 
             });
           } else {
-            bannedUsersMap.delete(req.user.username);
-            db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE username = ?", [req.user.username]);
+            db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE LOWER(username) = LOWER(?)", [username]);
           }
         }
       }
 
       const now = new Date().toISOString();
-      db.run("UPDATE users SET lastSeen = ? WHERE username = ?", [now, req.user.username]);
-    }
-
-    next();
+      db.run("UPDATE users SET lastSeen = ? WHERE LOWER(username) = LOWER(?)", [now, username]);
+      next();
+    });
   } catch (error) {
     res.status(401).json({ error: 'Token tidak valid atau kadaluarsa' });
   }
@@ -597,42 +632,61 @@ app.post('/api/admin/verify-pin', (req, res) => {
 
 app.get('/api/admin/users', authenticateAdmin, (req, res) => {
   db.all('SELECT id, username, publicKey, avatar, lastSeen, banStatus, banExpiresAt FROM users', [], (err, rows) => {
-    if (err) return res.status(500).json({ error: 'Database error' });
-    res.json(rows || []);
+    if (err) return res.status(500).json({ error: 'Database error: ' + err.message });
+    const formatted = (rows || []).map(r => ({
+      id: r.id,
+      username: r.username,
+      publicKey: r.publicKey || r.publickey || null,
+      avatar: r.avatar || null,
+      lastSeen: r.lastSeen || r.lastseen || null,
+      banStatus: r.banStatus || r.banstatus || 'active',
+      banExpiresAt: r.banExpiresAt || r.banexpiresat || null
+    }));
+    res.json(formatted);
   });
 });
 
 app.post('/api/admin/ban', authenticateAdmin, (req, res) => {
-  const { username, banType, durationHours } = req.body;
-  if (!username) return res.status(400).json({ error: 'Username required' });
-  if (username === 'anonim') return res.status(403).json({ error: 'Cannot ban admin user' });
+  const { username, banType, type, durationHours } = req.body;
+  const targetType = banType || type;
+  const cleanUser = (username || '').trim();
 
-  let banStatus = 'active';
+  if (!cleanUser) return res.status(400).json({ error: 'Username required' });
+  if (cleanUser.toLowerCase() === 'anonim') return res.status(403).json({ error: 'Tidak dapat memblokir akun Admin' });
+
+  let banStatus = 'permanently_banned';
   let banExpiresAt = null;
+  let banMessage = `Akun Anda (${cleanUser}) telah DIBLOKIR PERMANEN oleh Admin!`;
 
-  if (banType === 'permanent') {
-    banStatus = 'permanently_banned';
-  } else if (banType === 'temporary') {
+  if (targetType === 'temp' || targetType === 'temporary') {
     banStatus = 'temp_banned';
-    const hours = parseInt(durationHours) || 24;
+    const hours = parseFloat(durationHours) || 24;
     const expires = new Date();
     expires.setHours(expires.getHours() + hours);
     banExpiresAt = expires.toISOString();
+    banMessage = `Akun Anda (${cleanUser}) DIBLOKIR SEMENTARA oleh Admin selama ${hours} jam (sampai ${expires.toLocaleString('id-ID')}).`;
   }
 
-  db.run('UPDATE users SET banStatus = ?, banExpiresAt = ? WHERE username = ?', [banStatus, banExpiresAt, username], (err) => {
-    if (err) return res.status(500).json({ error: 'Database update error' });
-    res.json({ success: true, message: `User ${username} has been banned.` });
+  bannedUsersMap.set(cleanUser, { banStatus, banExpiresAt });
+  bannedUsersMap.set(cleanUser.toLowerCase(), { banStatus, banExpiresAt });
+
+  db.run('UPDATE users SET banStatus = ?, banExpiresAt = ? WHERE LOWER(username) = LOWER(?)', [banStatus, banExpiresAt, cleanUser], function(err) {
+    if (err) return res.status(500).json({ error: 'Database update error: ' + err.message });
+    res.json({ success: true, message: `Akun ${cleanUser} berhasil diblokir (${banStatus})!`, banStatus, banExpiresAt });
   });
 });
 
 app.post('/api/admin/unban', authenticateAdmin, (req, res) => {
   const { username } = req.body;
-  if (!username) return res.status(400).json({ error: 'Username required' });
+  const cleanUser = (username || '').trim();
+  if (!cleanUser) return res.status(400).json({ error: 'Username required' });
 
-  db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE username = ?", [username], (err) => {
-    if (err) return res.status(500).json({ error: 'Database update error' });
-    res.json({ success: true, message: `User ${username} unbanned.` });
+  bannedUsersMap.delete(cleanUser);
+  bannedUsersMap.delete(cleanUser.toLowerCase());
+
+  db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE LOWER(username) = LOWER(?)", [cleanUser], (err) => {
+    if (err) return res.status(500).json({ error: 'Database update error: ' + err.message });
+    res.json({ success: true, message: `User ${cleanUser} unbanned.` });
   });
 });
 

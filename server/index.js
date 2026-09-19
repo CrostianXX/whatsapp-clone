@@ -211,15 +211,19 @@ app.post('/login', (req, res) => {
 // High-performance in-memory ban cache (0ms DB overhead for message sync & blue ticks)
 const bannedUsersMap = new Map();
 
-// User Authentication Middleware (Requires valid JWT token + Fast Ban check)
+// User Authentication Middleware (Requires valid JWT token + DB Ban check)
 const authenticateUser = (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Unauthorized. Token required.' });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // { userId, username }
+    req.user = decoded;
+    const username = decoded.username;
 
-    const banInfo = bannedUsersMap.get(decoded.username);
+    if (!username) return next();
+
+    // 1. Check in-memory ban map first (0ms)
+    const banInfo = bannedUsersMap.get(username) || bannedUsersMap.get(username.toLowerCase());
     if (banInfo) {
       if (banInfo.banStatus === 'permanently_banned') {
         return res.status(403).json({ 
@@ -237,13 +241,47 @@ const authenticateUser = (req, res, next) => {
             message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(banInfo.banExpiresAt).toLocaleString('id-ID')}.` 
           });
         } else {
-          bannedUsersMap.delete(decoded.username);
-          db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE username = ?", [decoded.username]);
+          bannedUsersMap.delete(username);
+          bannedUsersMap.delete(username.toLowerCase());
+          db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE LOWER(username) = LOWER(?)", [username]);
         }
       }
     }
 
-    next();
+    // 2. DB fallback check to catch ban status if cache missed
+    db.get('SELECT banStatus, banExpiresAt FROM users WHERE LOWER(username) = LOWER(?)', [username], (err, user) => {
+      if (user) {
+        const bStatus = user.banStatus || user.banstatus;
+        const bExpires = user.banExpiresAt || user.banexpiresat;
+
+        if (bStatus === 'permanently_banned') {
+          bannedUsersMap.set(username, { banStatus: bStatus, banExpiresAt: bExpires });
+          bannedUsersMap.set(username.toLowerCase(), { banStatus: bStatus, banExpiresAt: bExpires });
+          return res.status(403).json({ 
+            error: 'BANNED', 
+            banStatus: 'permanently_banned',
+            message: 'Akun Anda telah DIBLOKIR PERMANEN oleh Admin!' 
+          });
+        }
+
+        if (bStatus === 'temp_banned' && bExpires) {
+          if (new Date() < new Date(bExpires)) {
+            bannedUsersMap.set(username, { banStatus: bStatus, banExpiresAt: bExpires });
+            bannedUsersMap.set(username.toLowerCase(), { banStatus: bStatus, banExpiresAt: bExpires });
+            return res.status(403).json({ 
+              error: 'BANNED', 
+              banStatus: 'temp_banned',
+              banExpiresAt: bExpires,
+              message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(bExpires).toLocaleString('id-ID')}.` 
+            });
+          } else {
+            db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE LOWER(username) = LOWER(?)", [username]);
+          }
+        }
+      }
+
+      next();
+    });
   } catch (error) {
     res.status(401).json({ error: 'Token tidak valid atau kadaluarsa' });
   }
@@ -255,11 +293,11 @@ app.get('/api/messages/private/sync', authenticateUser, (req, res) => {
   const since = req.query.since;
   const peer = req.query.peer;
 
-  let query = 'SELECT * FROM private_messages WHERE (fromUser = ? OR toUser = ?)';
+  let query = 'SELECT * FROM private_messages WHERE (LOWER(fromUser) = LOWER(?) OR LOWER(toUser) = LOWER(?))';
   let params = [username, username];
 
   if (peer) {
-    query += ' AND (fromUser = ? OR toUser = ?)';
+    query += ' AND (LOWER(fromUser) = LOWER(?) OR LOWER(toUser) = LOWER(?))';
     params.push(peer, peer);
   }
 
@@ -275,7 +313,17 @@ app.get('/api/messages/private/sync', authenticateUser, (req, res) => {
       console.error("[DB ERROR] Sync private messages:", err);
       return res.status(500).json({ error: 'Database error' });
     }
-    res.json(rows || []);
+    const formatted = (rows || []).map(r => ({
+      id: r.id,
+      messageId: r.messageId || r.messageid,
+      fromUser: r.fromUser || r.fromuser,
+      toUser: r.toUser || r.touser,
+      encryptedMessage: r.encryptedMessage || r.encryptedmessage,
+      timestamp: r.timestamp,
+      delivered: r.delivered,
+      status: r.status
+    }));
+    res.json(formatted);
   });
 });
 
@@ -470,7 +518,14 @@ app.post('/api/admin/verify-pin', authenticateAdmin, (req, res) => {
 app.get('/api/admin/users', authenticateAdmin, (req, res) => {
   db.all('SELECT id, username, lastSeen, banStatus, banExpiresAt FROM users', [], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
-    res.json(rows);
+    const formatted = (rows || []).map(r => ({
+      id: r.id,
+      username: r.username,
+      lastSeen: r.lastSeen || r.lastseen || null,
+      banStatus: r.banStatus || r.banstatus || 'active',
+      banExpiresAt: r.banExpiresAt || r.banexpiresat || null
+    }));
+    res.json(formatted);
   });
 });
 
