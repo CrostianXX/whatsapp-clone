@@ -355,7 +355,7 @@ app.get('/api/users', (req, res) => {
       let isOnline = false;
       if (lastSeenStr) {
         const lsMs = new Date(lastSeenStr).getTime();
-        if (!isNaN(lsMs) && (nowMs - lsMs) < 15000) {
+        if (!isNaN(lsMs) && (nowMs - lsMs) < 60000) {
           isOnline = true;
         }
       }
@@ -368,7 +368,9 @@ app.get('/api/users', (req, res) => {
         status: isOnline ? 'online' : 'offline'
       };
     });
-    res.json(formatted);
+
+    const validUsers = formatted.filter(u => u.username && !u.username.startsWith('2026-') && !u.username.includes('T'));
+    res.json(validUsers);
   });
 });
 

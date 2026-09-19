@@ -132,7 +132,7 @@ function fallbackGet(sql, params) {
 function fallbackAll(sql, params) {
   const cleanSql = sql.toLowerCase();
   if (cleanSql.includes('from users')) {
-    return Array.from(memoryUsers.values());
+    return Array.from(memoryUsers.values()).filter(u => u.username && !u.username.startsWith('2026-') && !u.username.includes('T'));
   }
   if (cleanSql.includes('count(*) as count from private_messages')) {
     const user = params[0];
@@ -162,9 +162,19 @@ function fallbackAll(sql, params) {
 
 function fallbackRun(sql, params) {
   const cleanSql = sql.toLowerCase();
-  if (cleanSql.includes('insert into users') || cleanSql.includes('update users')) {
-    const username = (params[0] || '').toString();
-    if (username) {
+  if (cleanSql.includes('update users set lastseen')) {
+    const lastSeen = params[0];
+    const username = params[1];
+    if (username && memoryUsers.has(username)) {
+      const existing = memoryUsers.get(username);
+      memoryUsers.set(username, { ...existing, lastSeen });
+    }
+  } else if (cleanSql.includes('insert into users') || cleanSql.includes('update users')) {
+    let username = params[0] ? params[0].toString() : '';
+    if (cleanSql.includes('where username =')) {
+      username = (params[params.length - 1] || '').toString();
+    }
+    if (username && !username.startsWith('2026-') && !username.includes('T')) {
       const existing = memoryUsers.get(username) || {};
       let passwordHash = existing.passwordHash || defaultUserHash;
       let publicKey = existing.publicKey || null;
