@@ -234,23 +234,77 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
 
   const handleSendPinterestImage = async (imageUrl) => {
     try {
-      const response = await fetch(`/api/images/download?url=${encodeURIComponent(imageUrl)}`);
-      if (!response.ok) throw new Error('Failed to download image');
-      const blob = await response.blob();
-      const reader = new FileReader();
-      reader.onload = (event) => {
+      let blob = null;
+      let contentType = 'image/jpeg';
+      try {
+        const response = await fetch(`/api/images/download?url=${encodeURIComponent(imageUrl)}`);
+        if (response.ok) {
+          blob = await response.blob();
+          contentType = response.headers.get('content-type') || 'image/jpeg';
+        }
+      } catch (e) {}
+
+      if (!blob) {
+        const directRes = await fetch(imageUrl, { mode: 'cors' }).catch(() => null);
+        if (directRes && directRes.ok) {
+          blob = await directRes.blob();
+          contentType = directRes.headers.get('content-type') || 'image/jpeg';
+        }
+      }
+
+      if (!blob) {
+        blob = await new Promise((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'Anonymous';
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || 800;
+            canvas.height = img.naturalHeight || 600;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.85);
+          };
+          img.onerror = () => resolve(null);
+          img.src = imageUrl;
+        });
+      }
+
+      if (blob) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          onSendMessage({
+            type: 'media',
+            fileBuffer: event.target.result,
+            fileName: `pinterest_${Date.now()}.jpg`,
+            mimeType: contentType,
+            replyTo: replyingTo
+          });
+          setReplyingTo(null);
+        };
+        reader.readAsDataURL(blob);
+      } else {
+        // Fallback: send as direct URL if binary conversion fails
         onSendMessage({
           type: 'media',
-          fileBuffer: event.target.result,
-          fileName: `unsplash_${Date.now()}.jpg`,
+          fileBuffer: imageUrl,
+          mediaUrl: imageUrl,
+          fileName: `pinterest_${Date.now()}.jpg`,
           mimeType: 'image/jpeg',
           replyTo: replyingTo
         });
         setReplyingTo(null);
-      };
-      reader.readAsDataURL(blob);
+      }
     } catch (err) {
-      alert('Gagal mengirim gambar: ' + err.message);
+      console.error('[PINTEREST SEND ERROR]', err);
+      onSendMessage({
+        type: 'media',
+        fileBuffer: imageUrl,
+        mediaUrl: imageUrl,
+        fileName: `pinterest_${Date.now()}.jpg`,
+        mimeType: 'image/jpeg',
+        replyTo: replyingTo
+      });
+      setReplyingTo(null);
     }
   };
 

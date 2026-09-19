@@ -436,7 +436,7 @@ const GLOBAL_ROOM = {
 
       if (selectedUserRef.current && selectedUserRef.current.username !== 'global') {
         const fresh = incomingList.find(u => u.username === selectedUserRef.current.username);
-        if (fresh && (fresh.publicKey !== selectedUserRef.current.publicKey || fresh.avatar !== selectedUserRef.current.avatar)) {
+        if (fresh) {
           setSelectedUser(prev => prev ? { ...prev, ...fresh } : fresh);
           selectedUserRef.current = { ...selectedUserRef.current, ...fresh };
         }
@@ -1184,12 +1184,15 @@ const GLOBAL_ROOM = {
         }).catch(err => console.error("REST private send error:", err));
       }
 
+      const targetUserFresh = users.find(u => u.username === selectedUser.username);
+      const isTargetOnline = targetUserFresh ? targetUserFresh.status === 'online' : (selectedUser.status === 'online');
+
       const localMsgObj = {
         id: messageId,
         sender: currentUser,
         timestamp: new Date(),
         type: payload.type,
-        status: 'sent',
+        status: isTargetOnline ? 'delivered' : 'sent',
         replyTo: payload.replyTo
       };
 
@@ -1283,7 +1286,7 @@ const GLOBAL_ROOM = {
             <ChatArea 
               messages={currentMessages} 
               currentUser={currentUser} 
-              recipient={selectedUser}
+              recipient={users.find(u => u.username === selectedUser.username) || selectedUser}
               onSendMessage={handleSendMessage}
               onDeleteMessage={handleDeleteMessage}
               onTyping={handleTyping}
