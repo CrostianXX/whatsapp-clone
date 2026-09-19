@@ -135,7 +135,10 @@ const GLOBAL_ROOM = {
   const [chatsLoaded, setChatsLoaded] = useState(false);
   const [typers, setTypers] = useState([]);
   const [unreadCounts, setUnreadCounts] = useState({});
-  const [myAvatar, setMyAvatar] = useState(null);
+  const [myAvatar, setMyAvatar] = useState(() => {
+    const savedUser = localStorage.getItem('wa_username');
+    return savedUser ? (localStorage.getItem(`wa_avatar_${savedUser}`) || null) : null;
+  });
   
   // Profile Viewer State
   const [profileModalUser, setProfileModalUser] = useState(null);
@@ -171,6 +174,8 @@ const GLOBAL_ROOM = {
     if (savedUser && savedToken) {
       setCurrentUser(savedUser);
       setToken(savedToken);
+      const savedAvatar = localStorage.getItem(`wa_avatar_${savedUser}`);
+      if (savedAvatar) setMyAvatar(savedAvatar);
     }
   }, []);
 
@@ -493,6 +498,9 @@ const GLOBAL_ROOM = {
         lastSyncTime = now;
 
         try {
+          // 0. Sync user list and profile pictures
+          await refreshUserList();
+
           // 1. Fetch server unread counts
           const unreadRes = await fetch('/api/messages/unread-counts', {
             headers: { 'Authorization': `Bearer ${token}` }

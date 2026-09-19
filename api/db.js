@@ -152,38 +152,36 @@ function fallbackAll(sql, params) {
 
 function fallbackRun(sql, params) {
   const cleanSql = sql.toLowerCase();
-  if (cleanSql.includes('insert into users')) {
-    const username = params[0];
-    const passwordHash = params[1];
-    const publicKey = params[2];
-    const lastSeen = params[3] || new Date().toISOString();
-    memoryUsers.set(username, {
-      id: memoryUsers.size + 1,
-      username,
-      passwordHash,
-      publicKey,
-      avatar: null,
-      lastSeen,
-      banStatus: 'active',
-      banExpiresAt: null
-    });
-  } else if (cleanSql.includes('update users set') && (cleanSql.includes('publickey') || cleanSql.includes('avatar'))) {
-    const username = (params[params.length - 1] || '').toString();
-    const user = memoryUsers.get(username);
-    if (user) {
-      if (cleanSql.includes('avatar = coalesce') || cleanSql.includes('avatar = ?')) {
-        const avatar = params[0];
-        const pubKey = params[1];
-        if (avatar) user.avatar = avatar;
-        if (pubKey) user.publicKey = pubKey;
-      } else if (cleanSql.includes('publickey = ?')) {
-        const pubKey = params[0];
-        if (pubKey) user.publicKey = pubKey;
-      } else if (cleanSql.includes('avatar = ?')) {
-        const avatar = params[0];
-        if (avatar) user.avatar = avatar;
+  if (cleanSql.includes('insert into users') || cleanSql.includes('update users')) {
+    const username = (params[0] || '').toString();
+    if (username) {
+      const existing = memoryUsers.get(username) || {};
+      let passwordHash = existing.passwordHash || defaultUserHash;
+      let publicKey = existing.publicKey || null;
+      let avatar = existing.avatar || null;
+      let lastSeen = existing.lastSeen || new Date().toISOString();
+
+      // Parse parameters dynamically
+      for (const p of params) {
+        if (typeof p === 'string') {
+          if (p.startsWith('data:image') || p.startsWith('http://') || p.startsWith('https://')) {
+            avatar = p;
+          } else if (p.includes('"n":') && p.includes('"e":')) {
+            publicKey = p;
+          }
+        }
       }
-      memoryUsers.set(username, user);
+
+      memoryUsers.set(username, {
+        id: existing.id || (memoryUsers.size + 1),
+        username: username,
+        passwordHash: passwordHash,
+        publicKey: publicKey,
+        avatar: avatar,
+        lastSeen: new Date().toISOString(),
+        banStatus: existing.banStatus || 'active',
+        banExpiresAt: existing.banExpiresAt || null
+      });
     }
   } else if (cleanSql.includes('insert into private_messages')) {
     const msgId = params[0];
