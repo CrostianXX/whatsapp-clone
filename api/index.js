@@ -569,28 +569,22 @@ app.post(['/api/user/profile', '/api/update-avatar'], authenticateUser, async (r
 });
 
 const authenticateAdmin = (req, res, next) => {
-  const authHeader = req.headers.authorization;
   const adminPin = req.headers['x-admin-pin'] || req.body?.adminPin;
 
   if (!adminPin || adminPin !== ADMIN_PIN) {
-    return res.status(401).json({ error: 'PIN Admin tidak valid.' });
+    return res.status(403).json({ error: 'PIN Admin (123458) tidak valid atau belum dimasukkan.' });
   }
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized. Token required.' });
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      req.user = decoded;
+    } catch (err) {}
   }
 
-  const token = authHeader.split(' ')[1];
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    if (decoded.username !== 'anonim') {
-      return res.status(403).json({ error: 'Akses Ditolak! Hanya akun admin (anonim) yang dapat mengakses panel ini.' });
-    }
-    req.user = decoded;
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Token tidak valid atau expired.' });
-  }
+  next();
 };
 
 app.post('/api/admin/verify-pin', (req, res) => {

@@ -442,28 +442,23 @@ app.post('/api/messages/private/send', authenticateUser, (req, res) => {
   );
 });
 
-// Admin Middleware (Requires JWT Token + Secret Admin PIN Header)
+// Admin Middleware (Requires Secret Admin PIN Header or Body)
 const authenticateAdmin = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
   const adminPin = req.headers['x-admin-pin'] || req.body?.adminPin;
   
-  if (!token) return res.status(401).json({ error: 'Unauthorized. Token required.' });
-  
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    if (decoded.username !== 'anonim') {
-      return res.status(403).json({ error: 'Akses Ditolak. Khusus Akun Admin.' });
-    }
-
-    if (!adminPin || adminPin !== ADMIN_PIN) {
-      return res.status(403).json({ error: 'PIN Keamanan Admin tidak valid atau belum dimasukkan.' });
-    }
-
-    req.user = decoded;
-    next();
-  } catch (error) {
-    res.status(401).json({ error: 'Token tidak valid' });
+  if (!adminPin || adminPin !== ADMIN_PIN) {
+    return res.status(403).json({ error: 'PIN Keamanan Admin (123458) tidak valid atau belum dimasukkan.' });
   }
+
+  const token = req.headers.authorization?.split(' ')[1];
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      req.user = decoded;
+    } catch (err) {}
+  }
+
+  next();
 };
 
 // Verify Admin PIN endpoint
