@@ -128,8 +128,9 @@ export const encryptMedia = async (aesKey, fileBuffer) => {
     if (buf.startsWith('data:')) {
       const base64Data = buf.split(',')[1] || '';
       const binaryString = atob(base64Data);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
       buf = bytes.buffer;
@@ -156,17 +157,19 @@ export const encryptMedia = async (aesKey, fileBuffer) => {
   let binary = '';
   const bytes = new Uint8Array(combined);
   const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(bytes[i]);
+  const chunkSize = 0x8000; // 32KB chunking for high performance
+  for (let i = 0; i < len; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunkSize, len)));
   }
   return btoa(binary);
 };
 
 export const decryptMedia = async (aesKey, base64EncryptedMedia) => {
   const binaryString = atob(base64EncryptedMedia);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
   }
 
   const iv = bytes.slice(0, 12);

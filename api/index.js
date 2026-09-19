@@ -27,7 +27,8 @@ app.use(helmet({
 }));
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-whatsapp-key-123';
 const db = require('./db');

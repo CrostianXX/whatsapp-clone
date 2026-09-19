@@ -324,6 +324,9 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
   };
 
   const resolveMediaUrl = (msg) => {
+    if (msg.blob) {
+      return URL.createObjectURL(msg.blob);
+    }
     if (msg.mediaUrl && (msg.mediaUrl.startsWith('data:') || msg.mediaUrl.startsWith('http:') || msg.mediaUrl.startsWith('https:') || msg.mediaUrl.startsWith('blob:'))) {
       return msg.mediaUrl;
     }

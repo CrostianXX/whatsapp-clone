@@ -593,6 +593,14 @@ const GLOBAL_ROOM = {
                     },
                     body: JSON.stringify({ room: activeRoom })
                   }).catch(err => {});
+
+                  if (socket && socket.connected) {
+                    socket.emit('message_status_update', {
+                      to: activeRoom,
+                      from: currentUser,
+                      status: 'read'
+                    });
+                  }
                 }
 
                 return updated;
@@ -1200,11 +1208,11 @@ const GLOBAL_ROOM = {
       if (payload.type === 'text') {
         localMsgObj.text = payload.text;
       } else if (payload.type === 'media') {
-        const blob = new Blob([payload.fileBuffer], { type: payload.mimeType });
+        const { mediaUrl, mimeType: resMime, blob } = processMediaObj(payload.fileBuffer, payload.fileName, payload.mimeType);
         localMsgObj.fileName = payload.fileName;
-        localMsgObj.mimeType = payload.mimeType;
-        localMsgObj.blob = blob;
-        localMsgObj.mediaUrl = URL.createObjectURL(blob);
+        localMsgObj.mimeType = resMime;
+        localMsgObj.mediaUrl = mediaUrl;
+        if (blob) localMsgObj.blob = blob;
       }
 
       setChats(prev => {
