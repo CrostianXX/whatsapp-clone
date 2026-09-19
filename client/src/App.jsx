@@ -343,21 +343,52 @@ const GLOBAL_ROOM = {
       }
     };
 
+    const mergeUserList = (incomingList) => {
+      if (!Array.isArray(incomingList) || incomingList.length === 0) return;
+      const me = incomingList.find(u => u.username === currentUser);
+      if (me && me.avatar) setMyAvatar(me.avatar);
+
+      setUsers(prevUsers => {
+        const userMap = new Map();
+
+        // Preserve all existing non-global users
+        prevUsers.forEach(u => {
+          if (u.username && u.username !== 'global') {
+            userMap.set(u.username, u);
+          }
+        });
+
+        // Merge incoming users
+        incomingList.forEach(u => {
+          if (u.username && u.username !== currentUser && u.username !== 'global') {
+            const existing = userMap.get(u.username) || {};
+            userMap.set(u.username, {
+              ...existing,
+              ...u,
+              publicKey: u.publicKey || existing.publicKey || null,
+              avatar: u.avatar || existing.avatar || null
+            });
+          }
+        });
+
+        return [GLOBAL_ROOM, ...Array.from(userMap.values())];
+      });
+
+      if (selectedUserRef.current && selectedUserRef.current.username !== 'global') {
+        const fresh = incomingList.find(u => u.username === selectedUserRef.current.username);
+        if (fresh && (fresh.publicKey !== selectedUserRef.current.publicKey || fresh.avatar !== selectedUserRef.current.avatar)) {
+          setSelectedUser(prev => prev ? { ...prev, ...fresh } : fresh);
+          selectedUserRef.current = { ...selectedUserRef.current, ...fresh };
+        }
+      }
+    };
+
     const refreshUserList = async () => {
       try {
         const res = await fetch('/api/users');
         if (res.ok) {
           const userList = await res.json();
-          const me = userList.find(u => u.username === currentUser);
-          if (me && me.avatar) setMyAvatar(me.avatar);
-          setUsers([GLOBAL_ROOM, ...userList.filter(u => u.username !== currentUser)]);
-          if (selectedUserRef.current && selectedUserRef.current.username !== 'global') {
-            const fresh = userList.find(u => u.username === selectedUserRef.current.username);
-            if (fresh && (fresh.publicKey !== selectedUserRef.current.publicKey || fresh.avatar !== selectedUserRef.current.avatar)) {
-              setSelectedUser(fresh);
-              selectedUserRef.current = fresh;
-            }
-          }
+          mergeUserList(userList);
         }
       } catch (err) {
         console.error("Failed to fetch user list via REST:", err);
@@ -427,7 +458,7 @@ const GLOBAL_ROOM = {
       const syncAllMessages = async () => {
         if (!currentUser || !token) return;
         const now = Date.now();
-        if (now - lastSyncTime < 2000) return;
+        if (now - lastSyncTime < 800) return;
         lastSyncTime = now;
 
         try {
@@ -558,36 +589,10 @@ const GLOBAL_ROOM = {
         newSocket.close();
         return;
       }
-      
-      const updateSelectedUserIfChanged = (userList) => {
-        if (selectedUserRef.current && selectedUserRef.current.username !== 'global') {
-          const fresh = userList.find(u => u.username === selectedUserRef.current.username);
-          if (fresh && (fresh.publicKey !== selectedUserRef.current.publicKey || fresh.avatar !== selectedUserRef.current.avatar)) {
-            setSelectedUser(fresh);
-            selectedUserRef.current = fresh;
-          }
-        }
-      };
-
-      // Fetch user list via REST API periodically so user list is always updated
-      const refreshUserList = async () => {
-        try {
-          const res = await fetch('/api/users');
-          if (res.ok) {
-            const userList = await res.json();
-            const me = userList.find(u => u.username === currentUser);
-            if (me && me.avatar) setMyAvatar(me.avatar);
-            setUsers([GLOBAL_ROOM, ...userList.filter(u => u.username !== currentUser)]);
-            updateSelectedUserIfChanged(userList);
-          }
-        } catch (err) {
-          console.error("Failed to fetch user list via REST:", err);
-        }
-      };
 
       refreshUserList();
-      const userListInterval = setInterval(refreshUserList, 4000);
-      const messageSyncInterval = setInterval(syncAllMessages, 2500);
+      const userListInterval = setInterval(refreshUserList, 2000);
+      const messageSyncInterval = setInterval(syncAllMessages, 1200);
 
       newSocket.on('connect', () => {
         console.log("Socket connected with ID:", newSocket.id);
@@ -615,11 +620,7 @@ const GLOBAL_ROOM = {
       });
 
       newSocket.on('users_list', (userList) => {
-        const me = userList.find(u => u.username === currentUser);
-        if (me && me.avatar) setMyAvatar(me.avatar);
-        
-        setUsers([GLOBAL_ROOM, ...userList.filter(u => u.username !== currentUser)]);
-        updateSelectedUserIfChanged(userList);
+        mergeUserList(userList);
       });
 
       newSocket.on('private_message', async (data) => {

@@ -28,9 +28,10 @@ function getPool() {
       pgPool = new Pool({
         connectionString: process.env.DATABASE_URL,
         ssl: { rejectUnauthorized: false },
-        connectionTimeoutMillis: 5000,
-        idleTimeoutMillis: 10000,
-        max: 10
+        connectionTimeoutMillis: 3000,
+        idleTimeoutMillis: 5000,
+        max: 3,
+        allowExitOnIdle: true
       });
       pgPool.on('error', (err) => {
         console.warn('[PG POOL IDLE WARN]', err.message);
@@ -238,11 +239,7 @@ const db = {
       try {
         const res = await pool.query(pgSql, params);
         const row = res.rows[0] || null;
-        if (row) {
-          return callback(null, row);
-        }
-        const fb = fallbackGet(sql, params);
-        return callback(null, fb);
+        return callback(null, row);
       } catch (err) {
         console.warn('[PG GET FALLBACK WARN]', err.message);
         const fb = fallbackGet(sql, params);
@@ -265,11 +262,27 @@ const db = {
       try {
         const res = await pool.query(pgSql, params);
         const rows = res.rows || [];
-        if (rows.length > 0) {
-          return callback(null, rows);
+
+        // Keep memoryUsers updated whenever users table is queried
+        if (sql.toLowerCase().includes('from users') && rows.length > 0) {
+          rows.forEach(r => {
+            const uname = r.username;
+            if (uname) {
+              memoryUsers.set(uname, {
+                id: r.id,
+                username: r.username,
+                passwordHash: r.passwordhash || r.passwordHash,
+                publicKey: r.publickey || r.publicKey,
+                avatar: r.avatar,
+                lastSeen: r.lastseen || r.lastSeen,
+                banStatus: r.banstatus || r.banStatus || 'active',
+                banExpiresAt: r.banexpiresat || r.banExpiresAt
+              });
+            }
+          });
         }
-        const fb = fallbackAll(sql, params);
-        return callback(null, fb);
+
+        return callback(null, rows);
       } catch (err) {
         console.warn('[PG ALL FALLBACK WARN]', err.message);
         const fb = fallbackAll(sql, params);
