@@ -153,6 +153,7 @@ const GLOBAL_ROOM = {
   
   // Profile Viewer State
   const [profileModalUser, setProfileModalUser] = useState(null);
+  const [bannedNotice, setBannedNotice] = useState(null);
   
   const [showAdminDashboard, setShowAdminDashboard] = useState(false);
 
@@ -741,8 +742,8 @@ const GLOBAL_ROOM = {
       }
 
       refreshUserList();
-      const userListInterval = setInterval(refreshUserList, 2000);
-      const messageSyncInterval = setInterval(syncAllMessages, 500);
+      const userListInterval = setInterval(refreshUserList, 5000);
+      const messageSyncInterval = setInterval(syncAllMessages, 15000);
 
       newSocket.on('connect', () => {
         console.log("Socket connected with ID:", newSocket.id);
@@ -761,16 +762,13 @@ const GLOBAL_ROOM = {
         syncAllMessages();
       });
 
-
       newSocket.on('force_disconnect', (data) => {
-        alert(data.message || 'Akun Anda telah DIBLOKIR oleh Admin!');
+        setBannedNotice(data || { message: 'Akun Anda telah DIBLOKIR oleh Admin!' });
         try {
-          localStorage.clear();
+          localStorage.removeItem('wa_username');
+          localStorage.removeItem('wa_token');
           sessionStorage.clear();
         } catch (e) {}
-        setCurrentUser(null);
-        setToken(null);
-        window.location.reload();
       });
 
       newSocket.on('users_list', (userList) => {
@@ -779,7 +777,7 @@ const GLOBAL_ROOM = {
 
       newSocket.on('message_status_update', (data) => {
         const { messageId, status, from, to } = data;
-        const peer = (from === currentUser) ? to : from;
+        const peer = (from === currentUser) ? to : (to === currentUser ? from : from);
         if (!peer) return;
 
         setChats(prev => {
@@ -788,8 +786,12 @@ const GLOBAL_ROOM = {
 
           let changed = false;
           const updated = peerChats.map(m => {
-            if ((messageId && (m.id === messageId || m.messageId === messageId)) || (!messageId && status === 'read' && m.sender === currentUser)) {
+            const isTarget = messageId 
+              ? (m.id === messageId || m.messageId === messageId) 
+              : (m.sender === currentUser);
+            if (isTarget) {
               if (m.status !== status) {
+                if (m.status === 'read' && status !== 'read') return m;
                 changed = true;
                 return { ...m, status };
               }
@@ -820,7 +822,6 @@ const GLOBAL_ROOM = {
           if (userChat.find(m => m.id === finalMsgObj.id)) return prev;
           return { ...prev, [from]: [...userChat, finalMsgObj] };
         });
-
 
         if (t0 && t1 && t3) {
           setTimeout(() => {
@@ -860,29 +861,6 @@ const GLOBAL_ROOM = {
             [from]: 0
           }));
         }
-      });
-
-      newSocket.on('message_status_update', ({ from, messageId, status }) => {
-        setChats(prev => {
-           const peer = from;
-           const userChat = prev[peer];
-           if (!userChat || userChat.length === 0) return prev;
-
-           let hasChange = false;
-           const updatedChat = userChat.map(msg => {
-              if (!messageId || msg.id === messageId) {
-                 if (msg.status !== status) {
-                    if (msg.status === 'read' && status !== 'read') return msg; // never downgrade
-                    hasChange = true;
-                    return { ...msg, status: status };
-                 }
-              }
-              return msg;
-           });
-
-           if (!hasChange) return prev;
-           return { ...prev, [peer]: updatedChat };
-        });
       });
 
       newSocket.on('user_typing', ({ username, isTyping }) => {
@@ -1331,6 +1309,62 @@ const GLOBAL_ROOM = {
       socket.emit('typing', { to: selectedUser.username, from: currentUser, isTyping });
     }
   };
+
+  if (bannedNotice) {
+    return (
+      <div style={{
+        minHeight: '100vh', width: '100vw', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        backgroundColor: '#0f172a', padding: '20px', boxSizing: 'border-box'
+      }}>
+        <div style={{
+          backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '24px',
+          padding: '36px 30px', maxWidth: '440px', width: '100%', textAlign: 'center',
+          boxShadow: '0 25px 50px -12px rgba(0,0,0,0.6)'
+        }}>
+          <div style={{
+            width: '72px', height: '72px', borderRadius: '50%',
+            backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            margin: '0 auto 20px auto', border: '1px solid rgba(239, 68, 68, 0.3)'
+          }}>
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+          </div>
+
+          <h2 style={{ color: '#ffffff', fontSize: '22px', fontWeight: 'bold', margin: '0 0 10px 0' }}>
+            {bannedNotice.banStatus === 'temp_banned' ? 'Akun Diblokir Sementara' : 'Akun Diblokir Permanen'}
+          </h2>
+
+          <div style={{
+            backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)',
+            borderRadius: '14px', padding: '14px 16px', color: '#fca5a5', fontSize: '14px',
+            lineHeight: '1.6', marginBottom: '24px', textAlign: 'left'
+          }}>
+            {bannedNotice.message || 'Akun Anda telah DIBLOKIR oleh Admin!'}
+          </div>
+
+          <button
+            onClick={() => {
+              setBannedNotice(null);
+              setCurrentUser(null);
+              setToken(null);
+            }}
+            style={{
+              width: '100%', padding: '14px', borderRadius: '12px', border: 'none',
+              backgroundColor: '#38bdf8', color: '#0f172a', fontWeight: 'bold',
+              fontSize: '15px', cursor: 'pointer', transition: 'all 0.2s ease',
+              boxShadow: '0 4px 14px rgba(56, 189, 248, 0.3)'
+            }}
+          >
+            Kembali ke Halaman Login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentUser || !token) {
     return (

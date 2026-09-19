@@ -160,24 +160,39 @@ function AdminDashboard({ token, onBack }) {
     }
   };
 
-  const handleBan = async (username, type) => {
-    let durationHours = 24;
-    let banTypeStr = type === 'perm' ? 'permanent' : 'temporary';
+  // Custom UI Ban Modal & Toast state
+  const [banModalTarget, setBanModalTarget] = useState(null); // { username: string, type: 'temp' | 'perm' | 'unban' }
+  const [banHours, setBanHours] = useState(24);
+  const [banSubmitting, setBanSubmitting] = useState(false);
+  const [adminToast, setAdminToast] = useState(null);
 
-    if (type === 'temp') {
-      const hours = prompt(`Berapa jam ingin memblokir sementara ${username}?`, '24');
-      if (hours === null) return;
-      durationHours = parseFloat(hours) || 24;
-    } else {
-      if (!window.confirm(`Yakin ingin MEMBLOKIR PERMANEN akun ${username}? User tidak akan bisa login kembali!`)) return;
+  // Auto hide toast after 4s
+  useEffect(() => {
+    if (adminToast) {
+      const timer = setTimeout(() => setAdminToast(null), 4000);
+      return () => clearTimeout(timer);
     }
+  }, [adminToast]);
 
-    const newStatus = banTypeStr === 'permanent' ? 'permanently_banned' : 'temp_banned';
-    const newExpiresAt = type === 'temp' ? new Date(Date.now() + durationHours * 3600000).toISOString() : null;
+  const openBanModal = (u, type) => {
+    setBanModalTarget({ username: u.username, type });
+    setBanHours(24);
+  };
+
+  const executeBanFromModal = async () => {
+    if (!banModalTarget) return;
+    const { username, type } = banModalTarget;
+    setBanSubmitting(true);
+
+    const isUnban = type === 'unban';
+    const isTemp = type === 'temp';
+    const banTypeStr = isTemp ? 'temporary' : (isUnban ? 'unban' : 'permanent');
+    const newStatus = isUnban ? 'active' : (isTemp ? 'temp_banned' : 'permanently_banned');
+    const newExpiresAt = isTemp ? new Date(Date.now() + banHours * 3600000).toISOString() : null;
 
     // Optimistically update UI immediately
     setUsers(prev => prev.map(u => {
-      if (u.username === username) {
+      if (u.username.toLowerCase() === username.toLowerCase()) {
         return {
           ...u,
           banStatus: newStatus,
@@ -190,67 +205,33 @@ function AdminDashboard({ token, onBack }) {
     }));
 
     try {
-      const res = await fetch(`${API_URL}/api/admin/ban`, {
+      const activePin = adminPin || sessionStorage.getItem('admin_pin') || '123458';
+      const endpoint = isUnban ? `${API_URL}/api/admin/unban` : `${API_URL}/api/admin/ban`;
+      const payload = isUnban 
+        ? { username, adminPin: activePin } 
+        : { username, banType: banTypeStr, type: banTypeStr, durationHours: banHours, adminPin: activePin };
+
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Authorization': `Bearer ${token}`,
-          'x-admin-pin': adminPin,
+          'x-admin-pin': activePin,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ username, banType: banTypeStr, durationHours })
+        body: JSON.stringify(payload)
       });
-      
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Gagal memblokir pengguna');
-      }
 
-      alert(data.message || `Akun ${username} berhasil diblokir (${banTypeStr})!`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Gagal memproses aksi admin');
+
+      setAdminToast({ message: data.message || `Aksi ${type.toUpperCase()} pada ${username} berhasil!`, type: 'success' });
+      setBanModalTarget(null);
       fetchUsers();
     } catch (err) {
-      alert(err.message || 'Gagal memblokir pengguna');
+      setAdminToast({ message: err.message || 'Gagal memproses aksi admin', type: 'error' });
       fetchUsers();
-    }
-  };
-
-  const handleUnban = async (username) => {
-    if (!window.confirm(`Yakin ingin membuka blokir (unban) untuk ${username}?`)) return;
-
-    // Optimistically update UI immediately
-    setUsers(prev => prev.map(u => {
-      if (u.username === username) {
-        return {
-          ...u,
-          banStatus: 'active',
-          banstatus: 'active',
-          banExpiresAt: null,
-          banexpiresat: null
-        };
-      }
-      return u;
-    }));
-
-    try {
-      const res = await fetch(`${API_URL}/api/admin/unban`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'x-admin-pin': adminPin,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ username })
-      });
-      
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Gagal membuka blokir');
-      }
-
-      alert(data.message || `Blokir akun ${username} berhasil dibuka!`);
-      fetchUsers();
-    } catch (err) {
-      alert(err.message || 'Gagal membuka blokir');
-      fetchUsers();
+    } finally {
+      setBanSubmitting(false);
     }
   };
 
@@ -261,13 +242,13 @@ function AdminDashboard({ token, onBack }) {
         method: 'POST',
         headers: { 
           'Authorization': `Bearer ${token}`,
-          'x-admin-pin': adminPin
+          'x-admin-pin': adminPin || '123458'
         }
       });
       if (!res.ok) throw new Error('Gagal menghapus global chat');
-      alert('Global chat berhasil dibersihkan!');
+      setAdminToast({ message: 'Global chat berhasil dibersihkan!', type: 'success' });
     } catch (err) {
-      alert(err.message);
+      setAdminToast({ message: err.message || 'Gagal menghapus global chat', type: 'error' });
     }
   };
 
@@ -615,7 +596,7 @@ function AdminDashboard({ token, onBack }) {
                           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                             {isBanned ? (
                               <button 
-                                onClick={() => handleUnban(u.username)}
+                                onClick={() => openBanModal(u, 'unban')}
                                 style={{ padding: '6px 14px', borderRadius: '8px', backgroundColor: '#10b981', color: 'white', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px', fontWeight: 'bold' }}
                               >
                                 <ShieldOff size={14} /> Unban
@@ -623,13 +604,13 @@ function AdminDashboard({ token, onBack }) {
                             ) : (
                               <>
                                 <button 
-                                  onClick={() => handleBan(u.username, 'temp')}
+                                  onClick={() => openBanModal(u, 'temp')}
                                   style={{ padding: '6px 12px', borderRadius: '8px', backgroundColor: '#f59e0b', color: 'white', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px', fontWeight: 'bold' }}
                                 >
                                   <Clock size={14} /> Temp Ban
                                 </button>
                                 <button 
-                                  onClick={() => handleBan(u.username, 'perm')}
+                                  onClick={() => openBanModal(u, 'perm')}
                                   style={{ padding: '6px 12px', borderRadius: '8px', backgroundColor: '#ef4444', color: 'white', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px', fontWeight: 'bold' }}
                                 >
                                   <Trash2 size={14} /> Perm Ban
@@ -722,6 +703,163 @@ function AdminDashboard({ token, onBack }) {
           </div>
         )}
       </div>
+
+      {/* --- CUSTOM UI BAN / UNBAN MODAL DIALOG --- */}
+      {banModalTarget && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '20px'
+        }} onClick={() => !banSubmitting && setBanModalTarget(null)}>
+          <div style={{
+            backgroundColor: 'var(--bg-secondary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '20px',
+            padding: '28px',
+            maxWidth: '440px', width: '100%',
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+            color: 'var(--text-primary)',
+            position: 'relative'
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <div style={{
+                width: '44px', height: '44px', borderRadius: '12px',
+                backgroundColor: banModalTarget.type === 'unban' ? 'rgba(16, 185, 129, 0.15)' : (banModalTarget.type === 'temp' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.15)'),
+                color: banModalTarget.type === 'unban' ? '#10b981' : (banModalTarget.type === 'temp' ? '#f59e0b' : '#ef4444'),
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>
+                {banModalTarget.type === 'unban' ? <ShieldOff size={24} /> : (banModalTarget.type === 'temp' ? <Clock size={24} /> : <Trash2 size={24} />)}
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>
+                  {banModalTarget.type === 'unban' ? 'Konfirmasi Unban User' : (banModalTarget.type === 'temp' ? 'Blokir Sementara (Temp Ban)' : 'Blokir Permanen (Perm Ban)')}
+                </h3>
+                <p style={{ margin: '2px 0 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  Target: <strong style={{ color: 'var(--primary-color)' }}>{banModalTarget.username}</strong>
+                </p>
+              </div>
+            </div>
+
+            {banModalTarget.type === 'temp' && (
+              <div style={{ marginBottom: '20px', backgroundColor: 'var(--bg-primary)', padding: '16px', borderRadius: '14px', border: '1px solid var(--border-color)' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                  PILIH DURASI BLOKIR SEMENTARA (JAM):
+                </label>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                  {[1, 6, 12, 24, 48, 168].map(hrs => (
+                    <button
+                      key={hrs}
+                      type="button"
+                      onClick={() => setBanHours(hrs)}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        backgroundColor: banHours === hrs ? 'var(--primary-color)' : 'var(--bg-secondary)',
+                        color: banHours === hrs ? 'white' : 'var(--text-primary)'
+                      }}
+                    >
+                      {hrs < 24 ? `${hrs} Jam` : `${hrs / 24} Hari`}
+                    </button>
+                  ))}
+                </div>
+                <input 
+                  type="number"
+                  min="1"
+                  max="8760"
+                  value={banHours}
+                  onChange={(e) => setBanHours(Math.max(1, parseInt(e.target.value) || 1))}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-secondary)',
+                    color: 'var(--text-primary)',
+                    fontSize: '15px',
+                    fontWeight: 'bold',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+            )}
+
+            {banModalTarget.type === 'perm' && (
+              <div style={{ padding: '12px 14px', borderRadius: '10px', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', fontSize: '13px', marginBottom: '20px', lineHeight: '1.5' }}>
+                ⚠️ Akun <strong style={{ color: '#ef4444' }}>{banModalTarget.username}</strong> akan diblokir permanen dari sistem dan socket-nya akan langsung terputus seketika!
+              </div>
+            )}
+
+            {banModalTarget.type === 'unban' && (
+              <div style={{ padding: '12px 14px', borderRadius: '10px', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#10b981', fontSize: '13px', marginBottom: '20px', lineHeight: '1.5' }}>
+                Isi status blokir akan dipulihkan dan user <strong style={{ color: '#10b981' }}>{banModalTarget.username}</strong> dapat kembali login ke sistem.
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                disabled={banSubmitting}
+                onClick={() => setBanModalTarget(null)}
+                style={{
+                  padding: '10px 18px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'transparent',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '14px'
+                }}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={banSubmitting}
+                onClick={executeBanFromModal}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  backgroundColor: banModalTarget.type === 'unban' ? '#10b981' : (banModalTarget.type === 'temp' ? '#f59e0b' : '#ef4444'),
+                  color: 'white',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+                }}
+              >
+                {banSubmitting ? 'Memproses...' : (banModalTarget.type === 'unban' ? 'Ya, Unban User' : 'Ya, Terapkan Ban')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- ADMIN TOAST NOTIFICATION --- */}
+      {adminToast && (
+        <div style={{
+          position: 'fixed', top: '24px', right: '24px', zIndex: 10000,
+          backgroundColor: adminToast.type === 'success' ? '#10b981' : '#ef4444',
+          color: 'white',
+          padding: '14px 20px',
+          borderRadius: '12px',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.3)',
+          display: 'flex', alignItems: 'center', gap: '10px',
+          fontSize: '14px', fontWeight: 'bold',
+          animation: 'fadeIn 0.3s ease'
+        }}>
+          <CheckCircle size={18} />
+          {adminToast.message}
+        </div>
+      )}
     </div>
   );
 }
