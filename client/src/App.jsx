@@ -128,7 +128,16 @@ const GLOBAL_ROOM = {
   avatar: '/logo.png'
 };
 
-  const [users, setUsers] = useState([GLOBAL_ROOM]);
+  const [users, setUsers] = useState(() => {
+    try {
+      const cached = localStorage.getItem('wa_users_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return [GLOBAL_ROOM];
+  });
   const [selectedUser, setSelectedUser] = useState(null);
   const selectedUserRef = useRef(null);
   const [chats, setChats] = useState({});
@@ -174,9 +183,17 @@ const GLOBAL_ROOM = {
           },
           body: JSON.stringify({ room: selectedUser.username })
         }).catch(err => console.error("Read receipt error:", err));
+
+        if (socket && socket.connected) {
+          socket.emit('message_status_update', {
+            to: selectedUser.username,
+            from: currentUser,
+            status: 'read'
+          });
+        }
       }
     }
-  }, [selectedUser, token]);
+  }, [selectedUser, token, socket, currentUser]);
 
   useEffect(() => {
     const savedUser = localStorage.getItem('wa_username');
@@ -410,7 +427,11 @@ const GLOBAL_ROOM = {
           }
         });
 
-        return [GLOBAL_ROOM, ...Array.from(userMap.values())];
+        const updatedList = [GLOBAL_ROOM, ...Array.from(userMap.values())];
+        try {
+          localStorage.setItem('wa_users_cache', JSON.stringify(updatedList));
+        } catch (e) {}
+        return updatedList;
       });
 
       if (selectedUserRef.current && selectedUserRef.current.username !== 'global') {
@@ -516,10 +537,13 @@ const GLOBAL_ROOM = {
 
           if (unreadRes && unreadRes.ok) {
             const counts = (await unreadRes.json()) || {};
-            if (selectedUserRef.current && selectedUserRef.current.username) {
-              counts[selectedUserRef.current.username] = 0;
-            }
-            setUnreadCounts(counts);
+            setUnreadCounts(prev => {
+              const merged = { ...prev, ...counts };
+              if (selectedUserRef.current && selectedUserRef.current.username) {
+                merged[selectedUserRef.current.username] = 0;
+              }
+              return merged;
+            });
           }
 
           if (pSyncRes && pSyncRes.ok) {
@@ -549,7 +573,7 @@ const GLOBAL_ROOM = {
                         text: (existing.text && existing.text !== '[Sent Message]' && existing.text !== '[Encrypted Message]') ? existing.text : (m.text || existing.text),
                         blob: existing.blob || m.blob,
                         mediaUrl: existing.mediaUrl || m.mediaUrl,
-                        status: (m.status === 'read' || m.status === 'delivered') ? m.status : (existing.status || m.status)
+                        status: (existing.status === 'read') ? 'read' : ((m.status === 'read' || m.status === 'delivered') ? m.status : (existing.status || m.status))
                       });
                     } else {
                       map.set(m.id, m);

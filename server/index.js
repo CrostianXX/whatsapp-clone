@@ -997,20 +997,28 @@ io.on('connection', (socket) => {
     const { to, messageId, status, from } = data;
     const now = new Date().toISOString();
 
-    if (messageId && status) {
-      if (status === 'read') {
+    if (status === 'read') {
+      if (messageId) {
         db.run('UPDATE private_messages SET status = "read", readAt = ? WHERE messageId = ?', [now, messageId]);
-      } else if (status === 'delivered') {
+      } else if (from && to) {
+        db.run('UPDATE private_messages SET status = "read", readAt = ? WHERE toUser = ? AND fromUser = ? AND status != "read"', [now, from, to]);
+      }
+    } else if (status === 'delivered') {
+      if (messageId) {
         db.run('UPDATE private_messages SET status = "delivered", deliveredAt = ? WHERE messageId = ? AND status = "sent"', [now, messageId]);
+      } else if (from && to) {
+        db.run('UPDATE private_messages SET status = "delivered", deliveredAt = ? WHERE toUser = ? AND fromUser = ? AND status = "sent"', [now, from, to]);
       }
     }
 
-    io.to(to).emit('message_status_update', {
-      messageId,
-      status,
-      from,
-      to
-    });
+    if (to) {
+      io.to(to).emit('message_status_update', {
+        messageId,
+        status,
+        from,
+        to
+      });
+    }
   });
 
 

@@ -206,19 +206,20 @@ function Sidebar({ users, currentUser, myAvatar, onAvatarUpdate, token, onSelect
                 )}
               </div>
               <div className="user-info">
-                <div className="user-name" style={{display: 'flex', alignItems: 'center'}}>
+                <div className="user-name" style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%'}}>
                   <span style={{ 
                     flex: 1, 
                     whiteSpace: 'nowrap', 
                     overflow: 'hidden', 
                     textOverflow: 'ellipsis',
+                    marginRight: '8px',
                     ...(user.isGroup ? { fontFamily: 'monospace, "Courier New", Courier', fontSize: '15px', color: 'var(--primary-color)', fontWeight: 800, letterSpacing: '0.5px' } : {})
                   }}>
                     {user.displayName || user.username}
                     {user.username === 'anonim' && <span style={{marginLeft: '4px'}} title="VIP Owner">👑</span>}
                   </span>
                   {unreadCounts[user.username] > 0 && selectedUser?.username !== user.username && (
-                    <span style={{
+                    <span className="unread-badge" style={{
                       backgroundColor: 'var(--primary-color)',
                       color: 'white',
                       borderRadius: '10px',
@@ -226,7 +227,6 @@ function Sidebar({ users, currentUser, myAvatar, onAvatarUpdate, token, onSelect
                       fontSize: '11px',
                       fontWeight: 'bold',
                       boxShadow: '0 0 10px var(--primary-glow)',
-                      marginLeft: '8px',
                       flexShrink: 0
                     }}>
                       {unreadCounts[user.username]}
