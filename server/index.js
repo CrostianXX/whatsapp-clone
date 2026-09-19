@@ -208,7 +208,10 @@ app.post('/login', (req, res) => {
   });
 });
 
-// User Authentication Middleware (Requires valid JWT token + Ban check)
+// High-performance in-memory ban cache (0ms DB overhead for message sync & blue ticks)
+const bannedUsersMap = new Map();
+
+// User Authentication Middleware (Requires valid JWT token + Fast Ban check)
 const authenticateUser = (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Unauthorized. Token required.' });
@@ -216,30 +219,31 @@ const authenticateUser = (req, res, next) => {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded; // { userId, username }
 
-    db.get('SELECT banStatus, banExpiresAt FROM users WHERE username = ?', [decoded.username], (err, user) => {
-      if (user) {
-        if (user.banStatus === 'permanently_banned') {
+    const banInfo = bannedUsersMap.get(decoded.username);
+    if (banInfo) {
+      if (banInfo.banStatus === 'permanently_banned') {
+        return res.status(403).json({ 
+          error: 'BANNED', 
+          banStatus: 'permanently_banned',
+          message: 'Akun Anda telah DIBLOKIR PERMANEN oleh Admin!' 
+        });
+      }
+      if (banInfo.banStatus === 'temp_banned' && banInfo.banExpiresAt) {
+        if (new Date() < new Date(banInfo.banExpiresAt)) {
           return res.status(403).json({ 
             error: 'BANNED', 
-            banStatus: 'permanently_banned',
-            message: 'Akun Anda telah DIBLOKIR PERMANEN oleh Admin!' 
+            banStatus: 'temp_banned',
+            banExpiresAt: banInfo.banExpiresAt,
+            message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(banInfo.banExpiresAt).toLocaleString('id-ID')}.` 
           });
-        }
-        if (user.banStatus === 'temp_banned' && user.banExpiresAt) {
-          if (new Date() < new Date(user.banExpiresAt)) {
-            return res.status(403).json({ 
-              error: 'BANNED', 
-              banStatus: 'temp_banned',
-              banExpiresAt: user.banExpiresAt,
-              message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(user.banExpiresAt).toLocaleString('id-ID')}.` 
-            });
-          } else {
-            db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE username = ?", [decoded.username]);
-          }
+        } else {
+          bannedUsersMap.delete(decoded.username);
+          db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE username = ?", [decoded.username]);
         }
       }
-      next();
-    });
+    }
+
+    next();
   } catch (error) {
     res.status(401).json({ error: 'Token tidak valid atau kadaluarsa' });
   }
@@ -529,24 +533,35 @@ app.post('/api/admin/ban', authenticateAdmin, (req, res) => {
     banMessage = `Akun Anda (${username}) DIBLOKIR SEMENTARA oleh Admin selama ${hours} jam (sampai ${expires.toLocaleString('id-ID')}).`;
   }
   
+  bannedUsersMap.set(username, { banStatus, banExpiresAt });
+
   db.run('UPDATE users SET banStatus = ?, banExpiresAt = ? WHERE username = ?', [banStatus, banExpiresAt, username], function(err) {
     if (err) return res.status(500).json({ error: 'Database error' });
     
-    // Broadcast force_disconnect to ALL sockets of the banned user immediately
+    // Broadcast force_disconnect to room `username` and specific socket
     io.to(username).emit('force_disconnect', {
       message: banMessage,
       banStatus: banStatus,
       banExpiresAt: banExpiresAt
     });
 
-    // Give 800ms window for client TCP frame receipt before closing socket
+    const userData = activeUsers.get(username);
+    if (userData && userData.socketId) {
+      io.to(userData.socketId).emit('force_disconnect', {
+        message: banMessage,
+        banStatus: banStatus,
+        banExpiresAt: banExpiresAt
+      });
+    }
+
+    // Give 500ms window for client TCP frame receipt before closing socket
     setTimeout(() => {
       if (io.in) {
         try {
           io.in(username).disconnectSockets(true);
         } catch (e) {}
       }
-    }, 800);
+    }, 500);
     
     activeUsers.delete(username);
 
@@ -566,6 +581,8 @@ app.post('/api/admin/unban', authenticateAdmin, (req, res) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ error: 'Username required' });
   
+  bannedUsersMap.delete(username);
+
   db.run('UPDATE users SET banStatus = "active", banExpiresAt = NULL WHERE username = ?', [username], function(err) {
     if (err) return res.status(500).json({ error: 'Database error' });
     if (typeof broadcastUserList === 'function') broadcastUserList();

@@ -157,6 +157,8 @@ app.post('/login', (req, res) => {
   });
 });
 
+const bannedUsersMap = new Map();
+
 const authenticateUser = (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Unauthorized. Token required.' });
@@ -165,36 +167,35 @@ const authenticateUser = (req, res, next) => {
     req.user = decoded;
 
     if (req.user && req.user.username) {
-      const now = new Date().toISOString();
-      db.run("UPDATE users SET lastSeen = ? WHERE username = ?", [now, req.user.username]);
-      
-      db.get('SELECT banStatus, banExpiresAt FROM users WHERE username = ?', [req.user.username], (err, user) => {
-        if (user) {
-          if (user.banStatus === 'permanently_banned') {
+      const banInfo = bannedUsersMap.get(req.user.username);
+      if (banInfo) {
+        if (banInfo.banStatus === 'permanently_banned') {
+          return res.status(403).json({ 
+            error: 'BANNED', 
+            banStatus: 'permanently_banned',
+            message: 'Akun Anda telah DIBLOKIR PERMANEN oleh Admin!' 
+          });
+        }
+        if (banInfo.banStatus === 'temp_banned' && banInfo.banExpiresAt) {
+          if (new Date() < new Date(banInfo.banExpiresAt)) {
             return res.status(403).json({ 
               error: 'BANNED', 
-              banStatus: 'permanently_banned',
-              message: 'Akun Anda telah DIBLOKIR PERMANEN oleh Admin!' 
+              banStatus: 'temp_banned',
+              banExpiresAt: banInfo.banExpiresAt,
+              message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(banInfo.banExpiresAt).toLocaleString('id-ID')}.` 
             });
-          }
-          if (user.banStatus === 'temp_banned' && user.banExpiresAt) {
-            if (new Date() < new Date(user.banExpiresAt)) {
-              return res.status(403).json({ 
-                error: 'BANNED', 
-                banStatus: 'temp_banned',
-                banExpiresAt: user.banExpiresAt,
-                message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(user.banExpiresAt).toLocaleString('id-ID')}.` 
-              });
-            } else {
-              db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE username = ?", [req.user.username]);
-            }
+          } else {
+            bannedUsersMap.delete(req.user.username);
+            db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE username = ?", [req.user.username]);
           }
         }
-        next();
-      });
-    } else {
-      next();
+      }
+
+      const now = new Date().toISOString();
+      db.run("UPDATE users SET lastSeen = ? WHERE username = ?", [now, req.user.username]);
     }
+
+    next();
   } catch (error) {
     res.status(401).json({ error: 'Token tidak valid atau kadaluarsa' });
   }
