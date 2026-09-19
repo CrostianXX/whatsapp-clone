@@ -83,7 +83,7 @@ function Sidebar({ users, currentUser, myAvatar, onAvatarUpdate, token, onSelect
     }
   };
 
-  const otherUsers = users.filter((u) => u.username !== currentUser);
+  const otherUsers = users.filter((u) => u.username && u.username !== currentUser && !u.username.startsWith('2026-') && !u.username.includes('T'));
 
   const handleLogout = () => {
     if (onLogout) {

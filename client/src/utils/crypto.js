@@ -123,6 +123,21 @@ export const generateAESKey = async () => {
 };
 
 export const encryptMedia = async (aesKey, fileBuffer) => {
+  let buf = fileBuffer;
+  if (typeof buf === 'string') {
+    if (buf.startsWith('data:')) {
+      const base64Data = buf.split(',')[1] || '';
+      const binaryString = atob(base64Data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      buf = bytes.buffer;
+    } else {
+      buf = new TextEncoder().encode(buf);
+    }
+  }
+
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
   const encryptedBuf = await window.crypto.subtle.encrypt(
     {
@@ -130,7 +145,7 @@ export const encryptMedia = async (aesKey, fileBuffer) => {
       iv: iv
     },
     aesKey,
-    fileBuffer
+    buf
   );
 
   // We return the IV + Encrypted Data as Base64
@@ -138,8 +153,6 @@ export const encryptMedia = async (aesKey, fileBuffer) => {
   combined.set(iv, 0);
   combined.set(new Uint8Array(encryptedBuf), iv.length);
   
-  // Using blob for very large files to avoid max call stack size on btoa
-  // But for simple Base64 stringification:
   let binary = '';
   const bytes = new Uint8Array(combined);
   const len = bytes.byteLength;

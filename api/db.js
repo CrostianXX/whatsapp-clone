@@ -95,8 +95,17 @@ async function ensureTables(pool) {
       CREATE INDEX IF NOT EXISTS idx_pm_conversation ON private_messages(fromUser, toUser, timestamp);
       CREATE INDEX IF NOT EXISTS idx_gm_timestamp ON global_messages(timestamp);
       CREATE INDEX IF NOT EXISTS idx_gmr_user ON global_message_reads(username, messageId);
+      
+      DELETE FROM users WHERE username LIKE '2026-%' OR username LIKE '%T%.%Z';
     `);
-    console.log('[SUPABASE DB] All PostgreSQL tables & indexes verified successfully.');
+    
+    for (const k of Array.from(memoryUsers.keys())) {
+      if (k.startsWith('2026-') || k.includes('T')) {
+        memoryUsers.delete(k);
+      }
+    }
+
+    console.log('[SUPABASE DB] All PostgreSQL tables & indexes verified successfully and invalid timestamp users purged.');
   } catch (e) {
     console.error('[SUPABASE DB INIT WARNING] Falling back to High-Availability Store:', e.message);
     tablesInitialized = false;
@@ -305,7 +314,7 @@ const db = {
         if (sql.toLowerCase().includes('from users') && rows.length > 0) {
           rows.forEach(r => {
             const uname = r.username;
-            if (uname) {
+            if (uname && !uname.startsWith('2026-') && !uname.includes('T')) {
               memoryUsers.set(uname, {
                 id: r.id,
                 username: r.username,

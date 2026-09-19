@@ -407,16 +407,16 @@ const GLOBAL_ROOM = {
       setUsers(prevUsers => {
         const userMap = new Map();
 
-        // Preserve all existing non-global users
+        // Preserve only valid non-global users (stripping fake date usernames)
         prevUsers.forEach(u => {
-          if (u.username && u.username !== 'global') {
+          if (u.username && u.username !== 'global' && !u.username.startsWith('2026-') && !u.username.includes('T')) {
             userMap.set(u.username, u);
           }
         });
 
-        // Merge incoming users
+        // Merge incoming users (stripping fake date usernames)
         incomingList.forEach(u => {
-          if (u.username && u.username !== currentUser && u.username !== 'global') {
+          if (u.username && u.username !== currentUser && u.username !== 'global' && !u.username.startsWith('2026-') && !u.username.includes('T')) {
             const existing = userMap.get(u.username) || {};
             userMap.set(u.username, {
               ...existing,
@@ -763,15 +763,16 @@ const GLOBAL_ROOM = {
 
       newSocket.on('message_status_update', ({ from, messageId, status }) => {
         setChats(prev => {
-           const userChat = [...(prev[from] || [])];
+           const peer = from;
+           const userChat = [...(prev[peer] || [])];
            const updatedChat = userChat.map(msg => {
-              if (msg.id === messageId) {
-                 if (msg.status === 'read') return msg; // never downgrade
+              if (!messageId || msg.id === messageId) {
+                 if (msg.status === 'read' && status !== 'read') return msg; // never downgrade
                  return { ...msg, status: status };
               }
               return msg;
            });
-           return { ...prev, [from]: updatedChat };
+           return { ...prev, [peer]: updatedChat };
         });
       });
 
