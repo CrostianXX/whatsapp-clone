@@ -785,6 +785,12 @@ const GLOBAL_ROOM = {
         } catch (e) {}
       });
 
+      newSocket.on('account_unbanned', (data) => {
+        setBannedNotice(null);
+        refreshUserList();
+        syncAllMessages();
+      });
+
       newSocket.on('users_list', (userList) => {
         mergeUserList(userList);
       });
@@ -1044,6 +1050,7 @@ const GLOBAL_ROOM = {
   }, [currentUser]);
 
   const handleLogin = (username, jwtToken) => {
+    setBannedNotice(null);
     setCurrentUser(username);
     setToken(jwtToken);
     localStorage.setItem('wa_username', username);

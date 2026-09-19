@@ -169,7 +169,9 @@ app.post('/login', (req, res) => {
     return;
   }
   
-  db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
+  const cleanUser = (username || '').trim();
+
+  db.get('SELECT * FROM users WHERE LOWER(username) = LOWER(?)', [cleanUser], async (err, user) => {
     if (err) {
       return res.status(500).json({ error: 'Database error' });
     }
@@ -179,14 +181,14 @@ app.post('/login', (req, res) => {
       const userPubKey = req.body.publicKey || null;
 
       db.run('INSERT INTO users (username, passwordHash, publicKey, lastSeen) VALUES (?, ?, ?, ?)', 
-        [username, passwordHash, userPubKey, new Date().toISOString()], 
+        [cleanUser, passwordHash, userPubKey, new Date().toISOString()], 
         function(err2) {
           if (err2) {
             console.error('[AUTO-REGISTER LOGIN ERROR]', err2);
             return res.status(500).json({ error: 'Gagal membuat akun baru di database' });
           }
-          const token = jwt.sign({ userId: this.lastID || 1, username: username }, JWT_SECRET);
-          return res.json({ token, username: username, userId: this.lastID || 1 });
+          const token = jwt.sign({ userId: this.lastID || 1, username: cleanUser }, JWT_SECRET);
+          return res.json({ token, username: cleanUser, userId: this.lastID || 1 });
         }
       );
       return;
@@ -195,12 +197,34 @@ app.post('/login', (req, res) => {
     const valid = await bcrypt.compare(password, user.passwordHash || user.passwordhash || '');
     if (!valid) return res.status(400).json({ error: 'Password salah! Periksa kembali password Anda.' });
     
-    if ((user.banStatus || user.banstatus) === 'permanently_banned') {
-      return res.status(403).json({ error: 'BANNED', message: 'Your account has been permanently banned.' });
+    const bStatus = user.banStatus || user.banstatus;
+    const bExpires = user.banExpiresAt || user.banexpiresat;
+
+    if (bStatus === 'permanently_banned') {
+      return res.status(403).json({ error: 'BANNED', banStatus: 'permanently_banned', message: 'Akun Anda telah DIBLOKIR PERMANEN oleh Admin!' });
     }
-    
+
+    if (bStatus === 'temp_banned' && bExpires) {
+      if (new Date() < new Date(bExpires)) {
+        return res.status(403).json({ 
+          error: 'BANNED', 
+          banStatus: 'temp_banned', 
+          banExpiresAt: bExpires, 
+          message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(bExpires).toLocaleString('id-ID')}.` 
+        });
+      } else {
+        // Auto-lift expired temp ban
+        bannedUsersMap.delete(cleanUser);
+        bannedUsersMap.delete(cleanUser.toLowerCase());
+        db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE LOWER(username) = LOWER(?)", [cleanUser]);
+      }
+    }
+
+    bannedUsersMap.delete(cleanUser);
+    bannedUsersMap.delete(cleanUser.toLowerCase());
+
     if (req.body.publicKey) {
-      db.run('UPDATE users SET publicKey = ? WHERE username = ?', [req.body.publicKey, username]);
+      db.run('UPDATE users SET publicKey = ? WHERE LOWER(username) = LOWER(?)', [req.body.publicKey, cleanUser]);
     }
     
     const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET);
@@ -629,14 +653,28 @@ app.post('/api/admin/ban', authenticateAdmin, (req, res) => {
 
 app.post('/api/admin/unban', authenticateAdmin, (req, res) => {
   const { username } = req.body;
-  if (!username) return res.status(400).json({ error: 'Username required' });
+  const cleanUser = (username || '').trim();
+  if (!cleanUser) return res.status(400).json({ error: 'Username required' });
   
-  bannedUsersMap.delete(username);
+  bannedUsersMap.delete(cleanUser);
+  bannedUsersMap.delete(cleanUser.toLowerCase());
+  bannedUsersMap.delete(cleanUser.toUpperCase());
 
-  db.run('UPDATE users SET banStatus = "active", banExpiresAt = NULL WHERE username = ?', [username], function(err) {
-    if (err) return res.status(500).json({ error: 'Database error' });
+  db.run('UPDATE users SET banStatus = "active", banExpiresAt = NULL WHERE LOWER(username) = LOWER(?)', [cleanUser], function(err) {
+    if (err) return res.status(500).json({ error: 'Database error: ' + err.message });
+    
+    // Broadcast socket update to target user room if online
+    if (typeof io !== 'undefined') {
+      io.to(cleanUser).emit('account_unbanned', { username: cleanUser });
+      for (const [sId, sSocket] of io.sockets.sockets.entries()) {
+        if (sSocket.username && sSocket.username.toLowerCase() === cleanUser.toLowerCase()) {
+          sSocket.emit('account_unbanned', { username: cleanUser });
+        }
+      }
+    }
+
     if (typeof broadcastUserList === 'function') broadcastUserList();
-    res.json({ success: true, message: `User ${username} unbanned.` });
+    res.json({ success: true, message: `Akun ${cleanUser} berhasil di-unban!` });
   });
 });
 

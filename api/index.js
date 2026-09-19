@@ -133,7 +133,7 @@ app.post('/login', (req, res) => {
       return;
     }
 
-    let valid = await bcrypt.compare(password, user.passwordHash || user.passwordhash || '');
+    const valid = await bcrypt.compare(password, user.passwordHash || user.passwordhash || '');
     
     // Legacy migration for 'anonim': if password is '123n' and user exists, sync passwordHash to 123n
     if (!valid && cleanUser === 'anonim' && password === '123n') {
@@ -144,12 +144,34 @@ app.post('/login', (req, res) => {
 
     if (!valid) return res.status(400).json({ error: 'Password salah! Periksa kembali password Anda.' });
 
-    if ((user.banStatus || user.banstatus) === 'permanently_banned') {
-      return res.status(403).json({ error: 'BANNED', message: 'Your account has been permanently banned.' });
+    const bStatus = user.banStatus || user.banstatus;
+    const bExpires = user.banExpiresAt || user.banexpiresat;
+
+    if (bStatus === 'permanently_banned') {
+      return res.status(403).json({ error: 'BANNED', banStatus: 'permanently_banned', message: 'Akun Anda telah DIBLOKIR PERMANEN oleh Admin!' });
     }
 
+    if (bStatus === 'temp_banned' && bExpires) {
+      if (new Date() < new Date(bExpires)) {
+        return res.status(403).json({ 
+          error: 'BANNED', 
+          banStatus: 'temp_banned', 
+          banExpiresAt: bExpires, 
+          message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(bExpires).toLocaleString('id-ID')}.` 
+        });
+      } else {
+        // Auto-lift expired temp ban
+        bannedUsersMap.delete(cleanUser);
+        bannedUsersMap.delete(cleanUser.toLowerCase());
+        db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE LOWER(username) = LOWER(?)", [cleanUser]);
+      }
+    }
+
+    bannedUsersMap.delete(cleanUser);
+    bannedUsersMap.delete(cleanUser.toLowerCase());
+
     if (req.body.publicKey) {
-      db.run('UPDATE users SET publicKey = ? WHERE username = ?', [req.body.publicKey, cleanUser]);
+      db.run('UPDATE users SET publicKey = ? WHERE LOWER(username) = LOWER(?)', [req.body.publicKey, cleanUser]);
     }
 
     const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET);
