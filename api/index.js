@@ -376,62 +376,71 @@ app.get('/api/users', (req, res) => {
   });
 });
 
-// Pinterest & High-Res Image Search JSON Endpoint for Vercel
+// Pinterest & High-Res Image Search Endpoint for Vercel (Bing Scraper + Flickr Feed)
 app.get('/api/images/search', async (req, res) => {
   const query = req.query.q || 'aesthetic wallpaper';
+  const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36';
 
+  const allImages = [];
+  const seenUrls = new Set();
+
+  // 1. Bing Pinterest Image Scraper
   try {
-    const allImages = [];
-
-    // 1. Unsplash Public Search
-    try {
-      const unRes = await fetch(`https://unsplash.com/napi/search/photos?query=${encodeURIComponent(query)}&per_page=30`);
-      if (unRes.ok) {
-        const unData = await unRes.json();
-        const results = unData.results || [];
-        results.forEach((item, idx) => {
-          if (item.urls?.regular || item.urls?.small) {
+    const bingRes = await fetch(`https://www.bing.com/images/search?q=${encodeURIComponent(query + ' pinterest')}&form=HDRSC2`, {
+      headers: { 'User-Agent': ua, 'Accept-Language': 'en-US,en;q=0.9' }
+    });
+    if (bingRes.ok) {
+      const html = await bingRes.text();
+      const matches = [...html.matchAll(/class="iusc"[^>]*?m="([^"]+)"/g)];
+      matches.forEach((m, idx) => {
+        try {
+          const rawJson = m[1].replace(/&quot;/g, '"');
+          const parsed = JSON.parse(rawJson);
+          const imgUrl = parsed.murl;
+          const thumbUrl = (parsed.turl || parsed.murl || '').replace(/&amp;/g, '&');
+          if (imgUrl && !seenUrls.has(imgUrl)) {
+            seenUrls.add(imgUrl);
             allImages.push({
-              id: item.id || `unsplash_${idx}`,
-              url: item.urls?.regular || item.urls?.full || item.urls?.small,
-              thumb: item.urls?.small || item.urls?.thumb || item.urls?.regular,
-              author: item.user?.name || item.user?.username || 'Pinterest',
-              authorLink: item.user?.links?.html || '#'
+              id: `bing_${idx}_${Date.now()}`,
+              url: imgUrl,
+              thumb: thumbUrl,
+              author: parsed.t || 'Pinterest / Web',
+              authorLink: parsed.purl || '#'
             });
           }
-        });
-      }
-    } catch (e) {
-      console.warn('[UNSPLASH SEARCH WARN]', e.message);
+        } catch (e) {}
+      });
     }
-
-    // 2. Pixabay Public Search
-    try {
-      const pixRes = await fetch(`https://pixabay.com/api/?key=38379461-9c60e336338b5065463f68be5&q=${encodeURIComponent(query)}&image_type=photo&per_page=30`);
-      if (pixRes.ok) {
-        const pixData = await pixRes.json();
-        const pixHits = pixData.hits || [];
-        pixHits.forEach((item) => {
-          if (item.largeImageURL || item.webformatURL) {
-            allImages.push({
-              id: `pixabay_${item.id}`,
-              url: item.largeImageURL || item.webformatURL,
-              thumb: item.webformatURL || item.previewURL,
-              author: item.user || 'Pinterest',
-              authorLink: '#'
-            });
-          }
-        });
-      }
-    } catch (e) {
-      console.warn('[PIXABAY SEARCH WARN]', e.message);
-    }
-
-    res.json({ images: allImages });
-  } catch (err) {
-    console.error('[IMAGE SEARCH ERROR]', err);
-    res.status(500).json({ error: 'Gagal memuat gambar.' });
+  } catch (e) {
+    console.warn('[BING SEARCH WARN]', e.message);
   }
+
+  // 2. Flickr Public Feed Fallback
+  try {
+    const flRes = await fetch(`https://www.flickr.com/services/feeds/photos_public.gne?tags=${encodeURIComponent(query.replace(/\s+/g, ','))}&format=json&nojsoncallback=1`);
+    if (flRes.ok) {
+      const flData = await flRes.json();
+      const items = flData.items || [];
+      items.forEach((item, idx) => {
+        const thumbUrl = item.media?.m;
+        const imgUrl = thumbUrl ? thumbUrl.replace('_m.', '_b.') : null;
+        if (imgUrl && !seenUrls.has(imgUrl)) {
+          seenUrls.add(imgUrl);
+          allImages.push({
+            id: `flickr_${idx}_${Date.now()}`,
+            url: imgUrl,
+            thumb: thumbUrl,
+            author: item.title || 'Pinterest / Flickr',
+            authorLink: item.link || '#'
+          });
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('[FLICKR SEARCH WARN]', e.message);
+  }
+
+  res.json({ images: allImages });
 });
 
 // Image Download Proxy Endpoint

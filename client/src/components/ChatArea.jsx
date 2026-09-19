@@ -600,11 +600,18 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
                       })()
                     ) : (
                       // Private chat: standard WA ticks
-                      <>
-                        {(!msg.status || msg.status === 'sent') && <Check size={14} color={isVip ? '#78350F' : 'rgba(255,255,255,0.7)'} />}
-                        {msg.status === 'delivered' && <CheckCheck size={14} color={isVip ? '#78350F' : 'rgba(255,255,255,0.7)'} />}
-                        {msg.status === 'read' && <CheckCheck size={14} color={isVip ? '#2563EB' : '#53bdeb'} />}
-                      </>
+                      (() => {
+                        const isRead = msg.status === 'read';
+                        const isDelivered = msg.status === 'delivered' || recipient.status === 'online';
+
+                        if (isRead) {
+                          return <CheckCheck size={14} color={isVip ? '#2563EB' : '#53bdeb'} title="Read" />;
+                        }
+                        if (isDelivered) {
+                          return <CheckCheck size={14} color={isVip ? '#78350F' : 'rgba(255,255,255,0.7)'} title="Delivered" />;
+                        }
+                        return <Check size={14} color={isVip ? '#78350F' : 'rgba(255,255,255,0.7)'} title="Sent" />;
+                      })()
                     )}
                   </span>
                 )}
