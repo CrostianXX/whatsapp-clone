@@ -292,6 +292,27 @@ const GLOBAL_ROOM = {
         const rawEnc = pm.encryptedMessage || pm.encryptedmessage;
         try { parsedPayload = JSON.parse(rawEnc); } catch (e) {}
 
+        if (parsedPayload && parsedPayload.plain) {
+          if (parsedPayload.type === 'media') {
+            const { mediaUrl, mimeType: resMime, blob } = processMediaObj(parsedPayload.fileBuffer, parsedPayload.fileName, parsedPayload.mimeType);
+            return {
+              ...finalMsgObj,
+              type: 'media',
+              fileName: parsedPayload.fileName,
+              mimeType: resMime,
+              blob: blob,
+              mediaUrl: mediaUrl,
+              replyTo: parsedPayload.replyTo
+            };
+          }
+          return {
+            ...finalMsgObj,
+            type: 'text',
+            text: parsedPayload.text,
+            replyTo: parsedPayload.replyTo
+          };
+        }
+
         if (parsedPayload && parsedPayload.type === 'media') {
           const encAesKey = (pm.fromUser === userCurrent || pm.sender === userCurrent)
             ? (parsedPayload.encryptedAesKeyS || parsedPayload.encryptedAesKey)
@@ -386,6 +407,13 @@ const GLOBAL_ROOM = {
     const refreshUserList = async () => {
       try {
         const res = await fetch('/api/users');
+        if (res.status === 401 || res.status === 403) {
+          localStorage.removeItem('wa_username');
+          localStorage.removeItem('wa_token');
+          setCurrentUser(null);
+          setToken(null);
+          return;
+        }
         if (res.ok) {
           const userList = await res.json();
           mergeUserList(userList);
@@ -466,6 +494,13 @@ const GLOBAL_ROOM = {
           const unreadRes = await fetch('/api/messages/unread-counts', {
             headers: { 'Authorization': `Bearer ${token}` }
           });
+          if (unreadRes.status === 401 || unreadRes.status === 403) {
+            localStorage.removeItem('wa_username');
+            localStorage.removeItem('wa_token');
+            setCurrentUser(null);
+            setToken(null);
+            return;
+          }
           if (unreadRes.ok) {
             const counts = (await unreadRes.json()) || {};
             if (selectedUserRef.current && selectedUserRef.current.username) {
@@ -478,6 +513,13 @@ const GLOBAL_ROOM = {
           const pSyncRes = await fetch('/api/messages/private/sync', {
             headers: { 'Authorization': `Bearer ${token}` }
           });
+          if (pSyncRes.status === 401 || pSyncRes.status === 403) {
+            localStorage.removeItem('wa_username');
+            localStorage.removeItem('wa_token');
+            setCurrentUser(null);
+            setToken(null);
+            return;
+          }
           if (pSyncRes.ok) {
             const privateRows = await pSyncRes.json();
             if (privateRows && privateRows.length > 0) {
@@ -616,6 +658,8 @@ const GLOBAL_ROOM = {
         alert(data.message || 'You have been disconnected.');
         localStorage.removeItem('wa_username');
         localStorage.removeItem('wa_token');
+        setCurrentUser(null);
+        setToken(null);
         window.location.reload();
       });
 
@@ -826,14 +870,15 @@ const GLOBAL_ROOM = {
         });
       });
 
-      newSocket.on('message_reaction', ({ to: room, messageId, emoji, from, reactions: serverReactions }) => {
+      newSocket.on('message_reaction', ({ to: room, messageId, emoji, from, serverReactions, reactions }) => {
         setChats(prev => {
           const roomChats = prev[room] || [];
           const updatedChat = roomChats.map(msg => {
             if (msg.id === messageId) {
               let newReactions = { ...(msg.reactions || {}) };
-              if (serverReactions) {
-                newReactions = serverReactions;
+              const sReactions = serverReactions || reactions;
+              if (sReactions) {
+                newReactions = sReactions;
               } else {
                  if (newReactions[from] === emoji) delete newReactions[from];
                  else newReactions[from] = emoji;
@@ -1011,48 +1056,15 @@ const GLOBAL_ROOM = {
         const found = users.find(u => u.username === selectedUser.username);
         if (found && found.publicKey && found.publicKey !== 'ADMIN_PUBLIC_KEY') {
           targetPubKeyStr = found.publicKey;
-        } else {
-          try {
-            const res = await fetch('/api/users');
-            if (res.ok) {
-              const freshUsers = await res.json();
-              const freshRecipient = freshUsers.find(u => u.username === selectedUser.username);
-              if (freshRecipient && freshRecipient.publicKey && freshRecipient.publicKey !== 'ADMIN_PUBLIC_KEY') {
-                targetPubKeyStr = freshRecipient.publicKey;
-              }
-            }
-          } catch (e) {}
         }
       }
 
-      if (!targetPubKeyStr || targetPubKeyStr === 'ADMIN_PUBLIC_KEY') {
-        alert(`Gagal mengirim pesan: Kunci publik ${selectedUser.username} belum terdaftar. Minta pengguna tersebut untuk login kembali.`);
-        return;
-      }
-
-      let recipientPubKey;
-      try {
-        recipientPubKey = await importPublicKey(targetPubKeyStr);
-      } catch (e) {
+      let recipientPubKey = null;
+      if (targetPubKeyStr && targetPubKeyStr !== 'ADMIN_PUBLIC_KEY') {
         try {
-          const res = await fetch('/api/users');
-          if (res.ok) {
-            const freshUsers = await res.json();
-            const freshRecipient = freshUsers.find(u => u.username === selectedUser.username);
-            if (freshRecipient && freshRecipient.publicKey && freshRecipient.publicKey !== 'ADMIN_PUBLIC_KEY') {
-              recipientPubKey = await importPublicKey(freshRecipient.publicKey);
-              setSelectedUser(freshRecipient);
-              selectedUserRef.current = freshRecipient;
-            }
-          }
-        } catch (retryErr) {}
+          recipientPubKey = await importPublicKey(targetPubKeyStr);
+        } catch (e) {}
       }
-
-      if (!recipientPubKey) {
-        alert(`Gagal mengirim pesan: Kunci publik ${selectedUser.username} belum terdaftar atau tidak valid. Minta ${selectedUser.username} untuk login/refresh halaman.`);
-        return;
-      }
-
 
       const senderPubKeyStr = localStorage.getItem(`publicKey_${currentUser}`);
       let senderPubKey = null;
@@ -1061,40 +1073,57 @@ const GLOBAL_ROOM = {
       }
 
       const messageId = Date.now().toString() + Math.random();
-      
-      // Dual-Encryption: Encrypt for both recipient and sender so both can decrypt from DB
       let encryptedPayload;
 
-      if (payload.type === 'text') {
-        const textPayloadObj = { text: payload.text, replyTo: payload.replyTo };
-        const textPayloadStr = JSON.stringify(textPayloadObj);
+      if (recipientPubKey) {
+        if (payload.type === 'text') {
+          const textPayloadObj = { text: payload.text, replyTo: payload.replyTo };
+          const textPayloadStr = JSON.stringify(textPayloadObj);
 
-        const encRecipient = await encryptMessage(recipientPubKey, textPayloadStr);
-        let encSender = null;
-        if (senderPubKey) {
-          try { encSender = await encryptMessage(senderPubKey, textPayloadStr); } catch (e) {}
+          const encRecipient = await encryptMessage(recipientPubKey, textPayloadStr);
+          let encSender = null;
+          if (senderPubKey) {
+            try { encSender = await encryptMessage(senderPubKey, textPayloadStr); } catch (e) {}
+          }
+
+          encryptedPayload = JSON.stringify({ r: encRecipient, s: encSender });
+        } else if (payload.type === 'media') {
+          const aesKey = await generateAESKey();
+          const encryptedMediaBase64 = await encryptMedia(aesKey, payload.fileBuffer);
+
+          const encAesRecipient = await encryptAESKeyWithRSA(recipientPubKey, aesKey);
+          let encAesSender = null;
+          if (senderPubKey) {
+            try { encAesSender = await encryptAESKeyWithRSA(senderPubKey, aesKey); } catch (e) {}
+          }
+
+          encryptedPayload = JSON.stringify({
+            type: 'media',
+            fileName: payload.fileName,
+            mimeType: payload.mimeType,
+            encryptedContent: encryptedMediaBase64,
+            encryptedAesKeyR: encAesRecipient,
+            encryptedAesKeyS: encAesSender,
+            replyTo: payload.replyTo
+          });
         }
-
-        encryptedPayload = JSON.stringify({ r: encRecipient, s: encSender });
-      } else if (payload.type === 'media') {
-        const aesKey = await generateAESKey();
-        const encryptedMediaBase64 = await encryptMedia(aesKey, payload.fileBuffer);
-
-        const encAesRecipient = await encryptAESKeyWithRSA(recipientPubKey, aesKey);
-        let encAesSender = null;
-        if (senderPubKey) {
-          try { encAesSender = await encryptAESKeyWithRSA(senderPubKey, aesKey); } catch (e) {}
+      } else {
+        if (payload.type === 'text') {
+          encryptedPayload = JSON.stringify({
+            plain: true,
+            text: payload.text,
+            replyTo: payload.replyTo
+          });
+        } else if (payload.type === 'media') {
+          encryptedPayload = JSON.stringify({
+            type: 'media',
+            plain: true,
+            fileName: payload.fileName,
+            mimeType: payload.mimeType,
+            fileBuffer: payload.fileBuffer,
+            replyTo: payload.replyTo
+          });
         }
-
-        encryptedPayload = JSON.stringify({
-          type: 'media',
-          fileName: payload.fileName,
-          mimeType: payload.mimeType,
-          encryptedContent: encryptedMediaBase64,
-          encryptedAesKeyR: encAesRecipient,
-          encryptedAesKeyS: encAesSender,
-          replyTo: payload.replyTo
-        });
       }
 
 
@@ -1145,8 +1174,7 @@ const GLOBAL_ROOM = {
         return { ...prev, [selectedUser.username]: [...userChat, localMsgObj] };
       });
     } catch (e) {
-      console.error("Encryption failed", e);
-      alert("Failed to encrypt message. The recipient's public key might be invalid.");
+      console.error("Message send failed:", e);
     }
   };
 

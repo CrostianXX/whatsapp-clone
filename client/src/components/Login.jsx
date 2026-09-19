@@ -114,7 +114,7 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
       let privateKeyStr = localStorage.getItem(`privateKey_${cleanUser}`);
       let publicKeyStr = localStorage.getItem(`publicKey_${cleanUser}`);
 
-      if (!privateKeyStr || !publicKeyStr) {
+      if (!privateKeyStr || !publicKeyStr || privateKeyStr === 'undefined' || publicKeyStr === 'undefined' || privateKeyStr === 'null' || publicKeyStr === 'null') {
         const keyPair = await generateKeyPair();
         publicKeyStr = await exportPublicKey(keyPair.publicKey);
         privateKeyStr = await exportPrivateKey(keyPair.privateKey);
