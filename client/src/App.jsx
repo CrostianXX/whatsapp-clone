@@ -566,7 +566,12 @@ const GLOBAL_ROOM = {
                 const existingList = chatsRef.current ? (chatsRef.current[peer] || []) : [];
                 const existingMsg = existingList.find(m => m.id === mId);
 
-                if (existingMsg && existingMsg.text && existingMsg.text !== '[Encrypted Message]' && existingMsg.text !== '[Sent Message]') {
+                const isAlreadyDecrypted = existingMsg && (
+                  existingMsg.type === 'media' ||
+                  (existingMsg.text && existingMsg.text !== '[Encrypted Message]' && existingMsg.text !== '[Sent Message]')
+                );
+
+                if (isAlreadyDecrypted) {
                   // Fast path: message is already decrypted in memory! Pass updated status without WebCrypto RSA/AES overhead
                   decryptedPrivateMsgs[peer].push({
                     ...existingMsg,
