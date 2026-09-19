@@ -168,8 +168,15 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
     const file = e.target.files[0];
     if (!file) return;
 
+    if ((file.type.startsWith('video/') || file.name.endsWith('.mp4') || file.name.endsWith('.mov')) && file.size > 3.5 * 1024 * 1024) {
+      alert("Ukuran video maksimal adalah 3.5 MB agar dapat terkirim dan didekripsi secara utuh.");
+      e.target.value = null;
+      return;
+    }
+
     if (file.size > 25 * 1024 * 1024) {
-      alert("File size exceeds 25MB limit.");
+      alert("Ukuran file maksimal 25 MB.");
+      e.target.value = null;
       return;
     }
 

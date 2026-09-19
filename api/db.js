@@ -174,9 +174,9 @@ function fallbackRun(sql, params) {
   if (cleanSql.includes('update users set lastseen')) {
     const lastSeen = params[0];
     const username = params[1];
-    if (username && memoryUsers.has(username)) {
-      const existing = memoryUsers.get(username);
-      memoryUsers.set(username, { ...existing, lastSeen });
+    if (username && !username.startsWith('2026-') && !username.includes('T')) {
+      const existing = memoryUsers.get(username) || { id: memoryUsers.size + 1, username };
+      memoryUsers.set(username, { ...existing, username, lastSeen });
     }
   } else if (cleanSql.includes('insert into users') || cleanSql.includes('update users')) {
     let username = params[0] ? params[0].toString() : '';
