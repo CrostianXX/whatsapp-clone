@@ -272,8 +272,8 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
         <div style={{
           position: 'fixed',
           top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.75)',
-          backdropFilter: 'blur(8px)',
+          backgroundColor: 'rgba(0, 0, 0, 0.85)',
+          backdropFilter: 'blur(10px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -281,55 +281,59 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
           padding: '20px'
         }}>
           <div style={{
-            backgroundColor: 'var(--bg-secondary)',
-            border: '1px solid var(--border-color)',
+            backgroundColor: '#0f172a',
+            border: '1px solid #334155',
             borderRadius: '24px',
-            padding: '30px',
-            maxWidth: '420px',
+            padding: '32px',
+            maxWidth: '440px',
             width: '100%',
-            boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+            boxShadow: '0 25px 60px rgba(0, 0, 0, 0.8)',
             position: 'relative',
-            animation: 'fadeIn 0.2s ease-out'
+            animation: 'fadeIn 0.2s ease-out',
+            color: '#ffffff'
           }}>
             <button
               type="button"
               onClick={() => { setShowAdminModal(false); setModalError(''); }}
               style={{
-                position: 'absolute', top: '16px', right: '16px',
-                background: 'none', border: 'none', color: 'var(--text-secondary)',
-                cursor: 'pointer', padding: '6px'
+                position: 'absolute', top: '18px', right: '18px',
+                background: 'rgba(255,255,255,0.08)', border: 'none', color: '#94a3b8',
+                borderRadius: '50%', width: '32px', height: '32px',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
               }}
             >
-              <X size={20} />
+              <X size={18} />
             </button>
 
-            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+            <div style={{ textAlign: 'center', marginBottom: '22px' }}>
               <div style={{
-                width: '56px', height: '56px', borderRadius: '50%',
-                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                width: '60px', height: '60px', borderRadius: '50%',
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                border: '1px solid rgba(59, 130, 246, 0.4)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                margin: '0 auto 12px auto', color: '#3b82f6'
+                margin: '0 auto 14px auto', color: '#60a5fa'
               }}>
-                <Shield size={28} />
+                <Shield size={30} />
               </div>
-              <h3 style={{ margin: '0 0 6px 0', fontSize: '20px', color: 'var(--text-primary)' }}>
+              <h3 style={{ margin: '0 0 6px 0', fontSize: '22px', fontWeight: 'bold', color: '#ffffff' }}>
                 Verifikasi Keamanan Admin
               </h3>
-              <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>
-                Masukkan PIN Admin (123458) dan Verifikasi Kode CAPTCHA.
+              <p style={{ margin: 0, fontSize: '13.5px', color: '#94a3b8', lineHeight: '1.4' }}>
+                Masukkan PIN Admin (123458) dan Kode CAPTCHA Visual di bawah ini.
               </p>
             </div>
 
             {modalError && (
               <div style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                color: '#ef4444',
-                padding: '10px 14px',
+                backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                color: '#fca5a5',
+                padding: '12px 16px',
                 borderRadius: '12px',
-                fontSize: '13px',
-                marginBottom: '16px',
+                fontSize: '13.5px',
+                marginBottom: '18px',
                 textAlign: 'center',
-                fontWeight: 500
+                fontWeight: 600
               }}>
                 ⚠️ {modalError}
               </div>
@@ -337,12 +341,12 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
 
             <form onSubmit={handleAdminModalSubmit}>
               {/* PIN Input with Eye Toggle */}
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+              <div style={{ marginBottom: '18px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#cbd5e1', marginBottom: '8px', letterSpacing: '0.5px' }}>
                   PIN ADMIN (6-DIGIT):
                 </label>
                 <div style={{ position: 'relative' }}>
-                  <Key size={18} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+                  <Key size={18} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
                   <input
                     type={showPassword ? "text" : "password"}
                     maxLength={6}
@@ -353,14 +357,15 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
                       width: '100%',
                       padding: '12px 44px 12px 42px',
                       borderRadius: '12px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: 'var(--bg-primary)',
-                      color: 'var(--text-primary)',
+                      border: '1px solid #334155',
+                      backgroundColor: '#1e293b',
+                      color: '#ffffff',
                       fontSize: '18px',
                       letterSpacing: showPassword ? '2px' : '4px',
                       textAlign: 'center',
                       outline: 'none',
-                      boxSizing: 'border-box'
+                      boxSizing: 'border-box',
+                      fontWeight: 'bold'
                     }}
                     autoFocus
                   />
@@ -369,7 +374,7 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
                     onClick={() => setShowPassword(!showPassword)}
                     style={{
                       position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)',
-                      background: 'none', border: 'none', color: 'var(--text-secondary)',
+                      background: 'none', border: 'none', color: '#94a3b8',
                       cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center'
                     }}
                     title={showPassword ? "Sembunyikan PIN" : "Tampilkan PIN"}
@@ -381,55 +386,57 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
 
               {/* CAPTCHA Canvas & Input */}
               <div style={{
-                marginBottom: '20px',
-                padding: '14px',
-                borderRadius: '14px',
-                backgroundColor: 'var(--bg-primary)',
-                border: '1px solid var(--border-color)'
+                marginBottom: '22px',
+                padding: '16px',
+                borderRadius: '16px',
+                backgroundColor: '#1e293b',
+                border: '1px solid #334155'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>KODE CAPTCHA VISUAL:</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px' }}>KODE CAPTCHA VISUAL:</span>
                   <button
                     type="button"
                     onClick={refreshCaptcha}
                     style={{
-                      background: 'none', border: 'none', color: '#3b82f6',
-                      cursor: 'pointer', padding: '2px 6px', display: 'flex', alignItems: 'center',
-                      fontSize: '12px', fontWeight: 'bold', gap: '4px'
+                      background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)',
+                      color: '#60a5fa', borderRadius: '8px',
+                      cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center',
+                      fontSize: '12px', fontWeight: 'bold', gap: '5px'
                     }}
-                    title="Acak Uang Captcha"
+                    title="Acak Ulang Captcha"
                   >
                     <RefreshCw size={14} /> Refresh
                   </button>
                 </div>
 
-                <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+                <div style={{ textAlign: 'center', marginBottom: '14px' }}>
                   <canvas 
                     ref={canvasRef} 
-                    width={160} 
-                    height={44} 
-                    style={{ borderRadius: '8px', border: '1px solid var(--border-color)', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' }}
+                    width={180} 
+                    height={48} 
+                    style={{ borderRadius: '10px', border: '1px solid #475569', boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.5)' }}
                   />
                 </div>
 
                 <input
                   type="text"
                   maxLength={6}
-                  placeholder="Ketik 6 karakter Captcha..."
+                  placeholder="Ketik Captcha di atas..."
                   value={captchaInput}
                   onChange={(e) => setCaptchaInput(e.target.value)}
                   style={{
                     width: '100%',
-                    padding: '10px 12px',
+                    padding: '12px',
                     borderRadius: '10px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-secondary)',
-                    color: 'var(--text-primary)',
-                    fontSize: '15px',
+                    border: '2px solid #3b82f6',
+                    backgroundColor: '#0f172a',
+                    color: '#38bdf8',
+                    fontSize: '18px',
+                    fontWeight: 'bold',
                     textAlign: 'center',
                     textTransform: 'uppercase',
                     outline: 'none',
-                    letterSpacing: '2px',
+                    letterSpacing: '3px',
                     boxSizing: 'border-box'
                   }}
                 />
@@ -439,7 +446,7 @@ function Login({ onLoginSuccess, onLogin, theme, toggleTheme, language, toggleLa
                 type="submit"
                 disabled={loading}
                 className="split-submit-btn"
-                style={{ width: '100%', padding: '12px', fontWeight: 'bold', margin: 0 }}
+                style={{ width: '100%', padding: '14px', fontWeight: 'bold', margin: 0, fontSize: '16px', backgroundColor: '#3b82f6', borderRadius: '12px' }}
               >
                 {loading ? 'Memverifikasi...' : 'Verifikasi & Masuk Admin'}
               </button>

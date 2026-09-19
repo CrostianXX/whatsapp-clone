@@ -763,9 +763,11 @@ const GLOBAL_ROOM = {
 
 
       newSocket.on('force_disconnect', (data) => {
-        alert(data.message || 'You have been disconnected.');
-        localStorage.removeItem('wa_username');
-        localStorage.removeItem('wa_token');
+        alert(data.message || 'Akun Anda telah DIBLOKIR oleh Admin!');
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+        } catch (e) {}
         setCurrentUser(null);
         setToken(null);
         window.location.reload();

@@ -172,6 +172,23 @@ function AdminDashboard({ token, onBack }) {
       if (!window.confirm(`Yakin ingin MEMBLOKIR PERMANEN akun ${username}? User tidak akan bisa login kembali!`)) return;
     }
 
+    const newStatus = banTypeStr === 'permanent' ? 'permanently_banned' : 'temp_banned';
+    const newExpiresAt = type === 'temp' ? new Date(Date.now() + durationHours * 3600000).toISOString() : null;
+
+    // Optimistically update UI immediately
+    setUsers(prev => prev.map(u => {
+      if (u.username === username) {
+        return {
+          ...u,
+          banStatus: newStatus,
+          banstatus: newStatus,
+          banExpiresAt: newExpiresAt,
+          banexpiresat: newExpiresAt
+        };
+      }
+      return u;
+    }));
+
     try {
       const res = await fetch(`${API_URL}/api/admin/ban`, {
         method: 'POST',
@@ -192,11 +209,27 @@ function AdminDashboard({ token, onBack }) {
       fetchUsers();
     } catch (err) {
       alert(err.message || 'Gagal memblokir pengguna');
+      fetchUsers();
     }
   };
 
   const handleUnban = async (username) => {
     if (!window.confirm(`Yakin ingin membuka blokir (unban) untuk ${username}?`)) return;
+
+    // Optimistically update UI immediately
+    setUsers(prev => prev.map(u => {
+      if (u.username === username) {
+        return {
+          ...u,
+          banStatus: 'active',
+          banstatus: 'active',
+          banExpiresAt: null,
+          banexpiresat: null
+        };
+      }
+      return u;
+    }));
+
     try {
       const res = await fetch(`${API_URL}/api/admin/unban`, {
         method: 'POST',
@@ -217,6 +250,7 @@ function AdminDashboard({ token, onBack }) {
       fetchUsers();
     } catch (err) {
       alert(err.message || 'Gagal membuka blokir');
+      fetchUsers();
     }
   };
 

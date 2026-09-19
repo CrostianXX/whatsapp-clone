@@ -539,11 +539,14 @@ app.post('/api/admin/ban', authenticateAdmin, (req, res) => {
       banExpiresAt: banExpiresAt
     });
 
-    if (io.in) {
-      try {
-        io.in(username).disconnectSockets(true);
-      } catch (e) {}
-    }
+    // Give 800ms window for client TCP frame receipt before closing socket
+    setTimeout(() => {
+      if (io.in) {
+        try {
+          io.in(username).disconnectSockets(true);
+        } catch (e) {}
+      }
+    }, 800);
     
     activeUsers.delete(username);
 
@@ -850,8 +853,10 @@ io.on('connection', (socket) => {
     db.get('SELECT id, username, publicKey, banStatus, banExpiresAt FROM users WHERE username = ?', [username], (err, user) => {
       if (user) {
         if (user.banStatus === 'permanently_banned') {
-          socket.emit('force_disconnect', { message: 'Your account has been permanently banned.' });
-          socket.disconnect(true);
+          socket.emit('force_disconnect', { message: 'Akun Anda telah DIBLOKIR PERMANEN oleh Admin!' });
+          setTimeout(() => {
+            try { socket.disconnect(true); } catch(e) {}
+          }, 800);
           activeUsers.delete(username);
           activeSessions.delete(socket.id);
           return;
@@ -859,8 +864,10 @@ io.on('connection', (socket) => {
         
         if (user.banStatus === 'temp_banned' && user.banExpiresAt) {
           if (new Date() < new Date(user.banExpiresAt)) {
-            socket.emit('force_disconnect', { message: `Your account is temporarily banned until ${new Date(user.banExpiresAt).toLocaleString()}` });
-            socket.disconnect(true);
+            socket.emit('force_disconnect', { message: `Akun Anda DIBLOKIR SEMENTARA oleh Admin sampai ${new Date(user.banExpiresAt).toLocaleString('id-ID')}` });
+            setTimeout(() => {
+              try { socket.disconnect(true); } catch(e) {}
+            }, 800);
             activeUsers.delete(username);
             activeSessions.delete(socket.id);
             return;
