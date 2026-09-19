@@ -193,7 +193,7 @@ const GLOBAL_ROOM = {
         }
       }
     }
-  }, [selectedUser, token, socket, currentUser]);
+  }, [selectedUser?.username, token, socket, currentUser]);
 
   useEffect(() => {
     const savedUser = localStorage.getItem('wa_username');
@@ -428,6 +428,9 @@ const GLOBAL_ROOM = {
         });
 
         const updatedList = [GLOBAL_ROOM, ...Array.from(userMap.values())];
+        if (JSON.stringify(prevUsers) === JSON.stringify(updatedList)) {
+          return prevUsers;
+        }
         try {
           localStorage.setItem('wa_users_cache', JSON.stringify(updatedList));
         } catch (e) {}
@@ -437,8 +440,11 @@ const GLOBAL_ROOM = {
       if (selectedUserRef.current && selectedUserRef.current.username !== 'global') {
         const fresh = incomingList.find(u => u.username === selectedUserRef.current.username);
         if (fresh) {
-          setSelectedUser(prev => prev ? { ...prev, ...fresh } : fresh);
-          selectedUserRef.current = { ...selectedUserRef.current, ...fresh };
+          const cur = selectedUserRef.current;
+          if (cur.status !== fresh.status || cur.avatar !== fresh.avatar || cur.publicKey !== fresh.publicKey || cur.lastSeen !== fresh.lastSeen) {
+            setSelectedUser(prev => prev ? { ...prev, ...fresh } : fresh);
+            selectedUserRef.current = { ...selectedUserRef.current, ...fresh };
+          }
         }
       }
     };
@@ -525,7 +531,7 @@ const GLOBAL_ROOM = {
       const syncAllMessages = async () => {
         if (!currentUser || !token) return;
         const now = Date.now();
-        if (now - lastSyncTime < 800) return;
+        if (now - lastSyncTime < 250) return;
         lastSyncTime = now;
 
         try {
@@ -676,7 +682,7 @@ const GLOBAL_ROOM = {
 
       refreshUserList();
       const userListInterval = setInterval(refreshUserList, 2000);
-      const messageSyncInterval = setInterval(syncAllMessages, 1200);
+      const messageSyncInterval = setInterval(syncAllMessages, 500);
 
       newSocket.on('connect', () => {
         console.log("Socket connected with ID:", newSocket.id);
@@ -1219,6 +1225,7 @@ const GLOBAL_ROOM = {
         const userChat = prev[selectedUser.username] || [];
         return { ...prev, [selectedUser.username]: [...userChat, localMsgObj] };
       });
+      setTimeout(() => { syncAllMessages(); }, 50);
     } catch (e) {
       console.error("Message send failed:", e);
     }
