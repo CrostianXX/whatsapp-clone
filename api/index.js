@@ -610,7 +610,7 @@ app.post('/api/admin/unban', authenticateAdmin, (req, res) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ error: 'Username required' });
 
-  db.run('UPDATE users SET banStatus = "active", banExpiresAt = NULL WHERE username = ?', [username], (err) => {
+  db.run("UPDATE users SET banStatus = 'active', banExpiresAt = NULL WHERE username = ?", [username], (err) => {
     if (err) return res.status(500).json({ error: 'Database update error' });
     res.json({ success: true, message: `User ${username} unbanned.` });
   });

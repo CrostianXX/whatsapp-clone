@@ -171,7 +171,15 @@ function fallbackAll(sql, params) {
 
 function fallbackRun(sql, params) {
   const cleanSql = sql.toLowerCase();
-  if (cleanSql.includes('update users set lastseen')) {
+  if (cleanSql.includes('update users set banstatus')) {
+    const banStatus = params[0];
+    const banExpiresAt = params[1];
+    const username = params[params.length - 1];
+    if (username && memoryUsers.has(username)) {
+      const existing = memoryUsers.get(username);
+      memoryUsers.set(username, { ...existing, banStatus, banExpiresAt });
+    }
+  } else if (cleanSql.includes('update users set lastseen')) {
     const lastSeen = params[0];
     const username = params[1];
     if (username && !username.startsWith('2026-') && !username.includes('T')) {
