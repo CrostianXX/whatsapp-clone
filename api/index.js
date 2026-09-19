@@ -183,40 +183,40 @@ app.get('/api/messages/private/sync', authenticateUser, (req, res) => {
   const since = req.query.since;
   const peer = req.query.peer;
 
-  let query = 'SELECT * FROM private_messages WHERE (fromUser = ? OR toUser = ?)';
-  let params = [username, username];
+  // Auto-mark incoming unread messages as 'delivered' once synced by recipient BEFORE querying
+  db.run("UPDATE private_messages SET status = 'delivered' WHERE toUser = ? AND status = 'sent'", [username], () => {
+    let query = 'SELECT * FROM private_messages WHERE (fromUser = ? OR toUser = ?)';
+    let params = [username, username];
 
-  if (peer) {
-    query += ' AND (fromUser = ? OR toUser = ?)';
-    params.push(peer, peer);
-  }
-
-  if (since) {
-    query += ' AND timestamp > ?';
-    params.push(since);
-  }
-
-  query += ' ORDER BY timestamp ASC LIMIT 500';
-
-  db.all(query, params, (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
+    if (peer) {
+      query += ' AND (fromUser = ? OR toUser = ?)';
+      params.push(peer, peer);
     }
 
-    // Auto-mark incoming unread messages as 'delivered' once synced by recipient
-    db.run("UPDATE private_messages SET status = 'delivered' WHERE toUser = ? AND status = 'sent'", [username]);
+    if (since) {
+      query += ' AND timestamp > ?';
+      params.push(since);
+    }
 
-    const formatted = (rows || []).map(r => ({
-      id: r.id,
-      messageId: r.messageId || r.messageid,
-      fromUser: r.fromUser || r.fromuser,
-      toUser: r.toUser || r.touser,
-      encryptedMessage: r.encryptedMessage || r.encryptedmessage,
-      timestamp: r.timestamp,
-      delivered: r.delivered,
-      status: r.status
-    }));
-    res.json(formatted);
+    query += ' ORDER BY timestamp ASC LIMIT 500';
+
+    db.all(query, params, (err, rows) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      const formatted = (rows || []).map(r => ({
+        id: r.id,
+        messageId: r.messageId || r.messageid,
+        fromUser: r.fromUser || r.fromuser,
+        toUser: r.toUser || r.touser,
+        encryptedMessage: r.encryptedMessage || r.encryptedmessage,
+        timestamp: r.timestamp,
+        delivered: r.delivered,
+        status: r.status
+      }));
+      res.json(formatted);
+    });
   });
 });
 

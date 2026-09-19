@@ -508,21 +508,13 @@ const GLOBAL_ROOM = {
         lastSyncTime = now;
 
         try {
-          // 0. Sync user list and profile pictures
-          await refreshUserList();
+          const [unreadRes, pSyncRes, gSyncRes] = await Promise.all([
+            fetch('/api/messages/unread-counts', { headers: { 'Authorization': `Bearer ${token}` } }).catch(() => null),
+            fetch('/api/messages/private/sync', { headers: { 'Authorization': `Bearer ${token}` } }).catch(() => null),
+            fetch('/api/messages/global/sync', { headers: { 'Authorization': `Bearer ${token}` } }).catch(() => null)
+          ]);
 
-          // 1. Fetch server unread counts
-          const unreadRes = await fetch('/api/messages/unread-counts', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          if (unreadRes.status === 401 || unreadRes.status === 403) {
-            localStorage.removeItem('wa_username');
-            localStorage.removeItem('wa_token');
-            setCurrentUser(null);
-            setToken(null);
-            return;
-          }
-          if (unreadRes.ok) {
+          if (unreadRes && unreadRes.ok) {
             const counts = (await unreadRes.json()) || {};
             if (selectedUserRef.current && selectedUserRef.current.username) {
               counts[selectedUserRef.current.username] = 0;
@@ -530,18 +522,7 @@ const GLOBAL_ROOM = {
             setUnreadCounts(counts);
           }
 
-          // 2. Fetch private message sync
-          const pSyncRes = await fetch('/api/messages/private/sync', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          if (pSyncRes.status === 401 || pSyncRes.status === 403) {
-            localStorage.removeItem('wa_username');
-            localStorage.removeItem('wa_token');
-            setCurrentUser(null);
-            setToken(null);
-            return;
-          }
-          if (pSyncRes.ok) {
+          if (pSyncRes && pSyncRes.ok) {
             const privateRows = await pSyncRes.json();
             if (privateRows && privateRows.length > 0) {
               const decryptedPrivateMsgs = {};
@@ -563,9 +544,9 @@ const GLOBAL_ROOM = {
                     const existing = map.get(m.id);
                     if (existing) {
                       map.set(m.id, {
-                        ...m,
                         ...existing,
-                        text: (m.text && m.text !== '[Sent Message]' && m.text !== '[Encrypted Message]') ? m.text : (existing.text || m.text),
+                        ...m,
+                        text: (existing.text && existing.text !== '[Sent Message]' && existing.text !== '[Encrypted Message]') ? existing.text : (m.text || existing.text),
                         blob: existing.blob || m.blob,
                         mediaUrl: existing.mediaUrl || m.mediaUrl,
                         status: (m.status === 'read' || m.status === 'delivered') ? m.status : (existing.status || m.status)
@@ -578,15 +559,15 @@ const GLOBAL_ROOM = {
                   updated[peer] = sorted;
                 }
 
-                // If currently viewing this peer's room, trigger read receipt
-                if (selectedUserRef.current && selectedUserRef.current.username && decryptedPrivateMsgs[selectedUserRef.current.username]) {
+                const activeRoom = selectedUserRef.current ? selectedUserRef.current.username : null;
+                if (activeRoom && activeRoom !== 'global' && decryptedPrivateMsgs[activeRoom]) {
                   fetch('/api/messages/read', {
                     method: 'POST',
                     headers: {
                       'Content-Type': 'application/json',
                       'Authorization': `Bearer ${token}`
                     },
-                    body: JSON.stringify({ room: selectedUserRef.current.username })
+                    body: JSON.stringify({ room: activeRoom })
                   }).catch(err => {});
                 }
 
@@ -595,12 +576,7 @@ const GLOBAL_ROOM = {
             }
           }
 
-
-          // 3. Fetch global message sync
-          const gSyncRes = await fetch('/api/messages/global/sync', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          if (gSyncRes.ok) {
+          if (gSyncRes && gSyncRes.ok) {
             const globalRows = await gSyncRes.json();
             if (globalRows && globalRows.length > 0) {
               setChats(prev => {
@@ -643,7 +619,7 @@ const GLOBAL_ROOM = {
             }
           }
         } catch (err) {
-          console.error("[SYNC ERROR]", err);
+          console.error("Error in syncAllMessages:", err);
         }
       };
 
