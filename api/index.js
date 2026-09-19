@@ -376,60 +376,61 @@ app.get('/api/users', (req, res) => {
   });
 });
 
-// Pinterest & High-Res Image Search SSE Endpoint for Vercel
+// Pinterest & High-Res Image Search JSON Endpoint for Vercel
 app.get('/api/images/search', async (req, res) => {
   const query = req.query.q || 'aesthetic wallpaper';
 
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*'
-  });
-
   try {
-    const unRes = await fetch(`https://unsplash.com/napi/search/photos?query=${encodeURIComponent(query)}&per_page=30`);
-    if (unRes.ok) {
-      const unData = await unRes.json();
-      const results = unData.results || [];
-      const images = results.map((item, idx) => ({
-        id: item.id || `unsplash_${idx}`,
-        url: item.urls?.regular || item.urls?.full || item.urls?.small,
-        thumb: item.urls?.small || item.urls?.thumb || item.urls?.regular,
-        author: item.user?.name || item.user?.username || 'Pinterest',
-        authorLink: item.user?.links?.html || '#'
-      })).filter(img => img.url);
+    const allImages = [];
 
-      if (images.length > 0) {
-        res.write(`data: ${JSON.stringify({ images })}\n\n`);
+    // 1. Unsplash Public Search
+    try {
+      const unRes = await fetch(`https://unsplash.com/napi/search/photos?query=${encodeURIComponent(query)}&per_page=30`);
+      if (unRes.ok) {
+        const unData = await unRes.json();
+        const results = unData.results || [];
+        results.forEach((item, idx) => {
+          if (item.urls?.regular || item.urls?.small) {
+            allImages.push({
+              id: item.id || `unsplash_${idx}`,
+              url: item.urls?.regular || item.urls?.full || item.urls?.small,
+              thumb: item.urls?.small || item.urls?.thumb || item.urls?.regular,
+              author: item.user?.name || item.user?.username || 'Pinterest',
+              authorLink: item.user?.links?.html || '#'
+            });
+          }
+        });
       }
+    } catch (e) {
+      console.warn('[UNSPLASH SEARCH WARN]', e.message);
     }
 
+    // 2. Pixabay Public Search
     try {
       const pixRes = await fetch(`https://pixabay.com/api/?key=38379461-9c60e336338b5065463f68be5&q=${encodeURIComponent(query)}&image_type=photo&per_page=30`);
       if (pixRes.ok) {
         const pixData = await pixRes.json();
         const pixHits = pixData.hits || [];
-        const pixImages = pixHits.map((item) => ({
-          id: `pixabay_${item.id}`,
-          url: item.largeImageURL || item.webformatURL,
-          thumb: item.webformatURL || item.previewURL,
-          author: item.user || 'Pinterest',
-          authorLink: '#'
-        })).filter(img => img.url);
-
-        if (pixImages.length > 0) {
-          res.write(`data: ${JSON.stringify({ images: pixImages })}\n\n`);
-        }
+        pixHits.forEach((item) => {
+          if (item.largeImageURL || item.webformatURL) {
+            allImages.push({
+              id: `pixabay_${item.id}`,
+              url: item.largeImageURL || item.webformatURL,
+              thumb: item.webformatURL || item.previewURL,
+              author: item.user || 'Pinterest',
+              authorLink: '#'
+            });
+          }
+        });
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[PIXABAY SEARCH WARN]', e.message);
+    }
 
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-    res.end();
+    res.json({ images: allImages });
   } catch (err) {
     console.error('[IMAGE SEARCH ERROR]', err);
-    res.write(`data: ${JSON.stringify({ error: 'Gagal memuat gambar. Silakan coba kata kunci lain.' })}\n\n`);
-    res.end();
+    res.status(500).json({ error: 'Gagal memuat gambar.' });
   }
 });
 

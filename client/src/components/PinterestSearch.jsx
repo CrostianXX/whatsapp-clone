@@ -32,61 +32,30 @@ function PinterestSearch({ onClose, onSelectImage }) {
     
     setLoading(true);
     setError(null);
-    setImages([]); // Clear previous images immediately
-    
-    // Close existing EventSource if there is one (handled indirectly by activeSearchId, 
-    // but we can just use the native EventSource)
-    const eventSource = new EventSource(`/api/images/search?q=${encodeURIComponent(searchQuery)}`);
-    
-    eventSource.onmessage = (event) => {
-      // Ignore if user started a new search
-      if (activeSearchId.current !== currentSearchId) {
-        eventSource.close();
-        return;
-      }
+    setImages([]);
+
+    try {
+      const res = await fetch(`/api/images/search?q=${encodeURIComponent(searchQuery)}`);
+      if (!res.ok) throw new Error('Gagal memuat gambar.');
+      const data = await res.json();
       
-      try {
-        const data = JSON.parse(event.data);
-        
-        if (data.error) {
-          setError(data.error);
-          setLoading(false);
-          eventSource.close();
-          return;
-        }
-        
-        if (data.done) {
-          setLoading(false);
-          eventSource.close();
-          return;
-        }
-        
-        if (data.images && data.images.length > 0) {
-          setImages(prev => {
-            const newImgs = data.images.filter(img => !prev.some(p => p.id === img.id));
-            return [...prev, ...newImgs];
-          });
-          // Hide loader as soon as we have at least one batch of images!
-          setLoading(false);
-        }
-      } catch (e) {
-        console.error('Error parsing SSE data:', e);
-      }
-    };
-    
-    eventSource.onerror = (err) => {
       if (activeSearchId.current === currentSearchId) {
-        console.error('SSE Error:', err);
-        setImages(prev => {
-          if (prev.length === 0) {
-            setError('Gagal memuat stream gambar.');
-          }
-          return prev;
-        });
+        if (data.images && data.images.length > 0) {
+          setImages(data.images);
+        } else {
+          setError('Tidak ada gambar yang ditemukan.');
+        }
+      }
+    } catch (err) {
+      if (activeSearchId.current === currentSearchId) {
+        console.error('Image search error:', err);
+        setError('Gagal memuat gambar.');
+      }
+    } finally {
+      if (activeSearchId.current === currentSearchId) {
         setLoading(false);
       }
-      eventSource.close();
-    };
+    }
   };
 
 

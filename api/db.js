@@ -134,6 +134,16 @@ function fallbackAll(sql, params) {
   if (cleanSql.includes('from users')) {
     return Array.from(memoryUsers.values());
   }
+  if (cleanSql.includes('count(*) as count from private_messages')) {
+    const user = params[0];
+    const counts = {};
+    memoryPrivateMessages.forEach(pm => {
+      if (pm.toUser === user && pm.status !== 'read') {
+        counts[pm.fromUser] = (counts[pm.fromUser] || 0) + 1;
+      }
+    });
+    return Object.entries(counts).map(([fromUser, count]) => ({ fromUser, fromuser: fromUser, count }));
+  }
   if (cleanSql.includes('from private_messages')) {
     const user = params[0];
     const peer = params[2];
