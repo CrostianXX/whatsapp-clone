@@ -141,6 +141,8 @@ const GLOBAL_ROOM = {
   const [selectedUser, setSelectedUser] = useState(null);
   const selectedUserRef = useRef(null);
   const [chats, setChats] = useState({});
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
   const [chatsLoaded, setChatsLoaded] = useState(false);
   const [typers, setTypers] = useState([]);
   const [unreadCounts, setUnreadCounts] = useState({});
@@ -560,24 +562,41 @@ const GLOBAL_ROOM = {
                 const peer = pm.fromUser === currentUser ? pm.toUser : pm.fromUser;
                 if (!decryptedPrivateMsgs[peer]) decryptedPrivateMsgs[peer] = [];
 
-                const decryptedObj = await decryptPrivateMessageObj(pm, currentUser);
-                decryptedPrivateMsgs[peer].push(decryptedObj);
+                const mId = pm.messageId || pm.id;
+                const existingList = chatsRef.current ? (chatsRef.current[peer] || []) : [];
+                const existingMsg = existingList.find(m => m.id === mId);
+
+                if (existingMsg && existingMsg.text && existingMsg.text !== '[Encrypted Message]' && existingMsg.text !== '[Sent Message]') {
+                  // Fast path: message is already decrypted in memory! Pass updated status without WebCrypto RSA/AES overhead
+                  decryptedPrivateMsgs[peer].push({
+                    ...existingMsg,
+                    status: (existingMsg.status === 'read') ? 'read' : ((pm.status === 'read' || pm.status === 'delivered') ? pm.status : (existingMsg.status || pm.status))
+                  });
+                } else {
+                  // Un-decrypted or new message: decrypt with WebCrypto RSA/AES
+                  const decryptedObj = await decryptPrivateMessageObj(pm, currentUser);
+                  decryptedPrivateMsgs[peer].push(decryptedObj);
+                }
               }
 
               setChats(prev => {
-                let hasRealChanges = false;
+                let hasAnyRealChange = false;
                 const updated = { ...prev };
+
                 for (const peer in decryptedPrivateMsgs) {
                   const existingPeerChats = updated[peer] || [];
                   const map = new Map();
                   existingPeerChats.forEach(m => map.set(m.id, m));
+
+                  let peerChanged = false;
                   decryptedPrivateMsgs[peer].forEach(m => {
                     const existing = map.get(m.id);
                     if (existing) {
                       const newStatus = (existing.status === 'read') ? 'read' : ((m.status === 'read' || m.status === 'delivered') ? m.status : (existing.status || m.status));
                       const newText = (existing.text && existing.text !== '[Sent Message]' && existing.text !== '[Encrypted Message]') ? existing.text : (m.text || existing.text);
                       if (existing.status !== newStatus || existing.text !== newText) {
-                        hasRealChanges = true;
+                        peerChanged = true;
+                        hasAnyRealChange = true;
                         map.set(m.id, {
                           ...existing,
                           ...m,
@@ -588,11 +607,13 @@ const GLOBAL_ROOM = {
                         });
                       }
                     } else {
-                      hasRealChanges = true;
+                      peerChanged = true;
+                      hasAnyRealChange = true;
                       map.set(m.id, m);
                     }
                   });
-                  if (hasRealChanges) {
+
+                  if (peerChanged) {
                     const sorted = Array.from(map.values()).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
                     updated[peer] = sorted;
                   }
@@ -618,7 +639,7 @@ const GLOBAL_ROOM = {
                   }
                 }
 
-                if (!hasRealChanges) return prev;
+                if (!hasAnyRealChange) return prev;
                 return updated;
               });
             }
