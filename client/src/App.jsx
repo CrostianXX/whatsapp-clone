@@ -777,6 +777,31 @@ const GLOBAL_ROOM = {
         mergeUserList(userList);
       });
 
+      newSocket.on('message_status_update', (data) => {
+        const { messageId, status, from, to } = data;
+        const peer = (from === currentUser) ? to : from;
+        if (!peer) return;
+
+        setChats(prev => {
+          const peerChats = prev[peer];
+          if (!peerChats || peerChats.length === 0) return prev;
+
+          let changed = false;
+          const updated = peerChats.map(m => {
+            if ((messageId && (m.id === messageId || m.messageId === messageId)) || (!messageId && status === 'read' && m.sender === currentUser)) {
+              if (m.status !== status) {
+                changed = true;
+                return { ...m, status };
+              }
+            }
+            return m;
+          });
+
+          if (!changed) return prev;
+          return { ...prev, [peer]: updated };
+        });
+      });
+
       newSocket.on('private_message', async (data) => {
         const t4 = Date.now();
         const { from, encryptedMessage, timestamp, messageId, t0, t1, t3 } = data;

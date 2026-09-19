@@ -517,12 +517,14 @@ app.post('/api/admin/kick-session', authenticateAdmin, (req, res) => {
 app.post('/api/admin/ban', authenticateAdmin, (req, res) => {
   const { username, banType, type, durationHours } = req.body;
   const targetType = banType || type;
-  if (!username) return res.status(400).json({ error: 'Username required' });
-  if (username === 'anonim') return res.status(403).json({ error: 'Tidak dapat memblokir akun Admin' });
+  const cleanUser = (username || '').trim();
+
+  if (!cleanUser) return res.status(400).json({ error: 'Username required' });
+  if (cleanUser.toLowerCase() === 'anonim') return res.status(403).json({ error: 'Tidak dapat memblokir akun Admin' });
   
   let banStatus = 'permanently_banned';
   let banExpiresAt = null;
-  let banMessage = `Akun Anda (${username}) telah DIBLOKIR PERMANEN oleh Admin!`;
+  let banMessage = `Akun Anda (${cleanUser}) telah DIBLOKIR PERMANEN oleh Admin!`;
   
   if (targetType === 'temp' || targetType === 'temporary') {
     banStatus = 'temp_banned';
@@ -530,50 +532,48 @@ app.post('/api/admin/ban', authenticateAdmin, (req, res) => {
     const expires = new Date();
     expires.setHours(expires.getHours() + hours);
     banExpiresAt = expires.toISOString();
-    banMessage = `Akun Anda (${username}) DIBLOKIR SEMENTARA oleh Admin selama ${hours} jam (sampai ${expires.toLocaleString('id-ID')}).`;
+    banMessage = `Akun Anda (${cleanUser}) DIBLOKIR SEMENTARA oleh Admin selama ${hours} jam (sampai ${expires.toLocaleString('id-ID')}).`;
   }
   
-  bannedUsersMap.set(username, { banStatus, banExpiresAt });
+  bannedUsersMap.set(cleanUser, { banStatus, banExpiresAt });
+  bannedUsersMap.set(cleanUser.toLowerCase(), { banStatus, banExpiresAt });
 
-  db.run('UPDATE users SET banStatus = ?, banExpiresAt = ? WHERE username = ?', [banStatus, banExpiresAt, username], function(err) {
+  db.run('UPDATE users SET banStatus = ?, banExpiresAt = ? WHERE LOWER(username) = LOWER(?)', [banStatus, banExpiresAt, cleanUser], function(err) {
     if (err) return res.status(500).json({ error: 'Database error' });
     
-    // Broadcast force_disconnect to room `username` and specific socket
-    io.to(username).emit('force_disconnect', {
+    // Broadcast force_disconnect to room `cleanUser`
+    io.to(cleanUser).emit('force_disconnect', {
       message: banMessage,
       banStatus: banStatus,
       banExpiresAt: banExpiresAt
     });
 
-    const userData = activeUsers.get(username);
-    if (userData && userData.socketId) {
-      io.to(userData.socketId).emit('force_disconnect', {
-        message: banMessage,
-        banStatus: banStatus,
-        banExpiresAt: banExpiresAt
-      });
-    }
-
-    // Give 500ms window for client TCP frame receipt before closing socket
-    setTimeout(() => {
-      if (io.in) {
-        try {
-          io.in(username).disconnectSockets(true);
-        } catch (e) {}
+    // Directly emit force_disconnect to ALL active sockets of this user
+    for (const [sId, sSocket] of io.sockets.sockets.entries()) {
+      if (sSocket.username && sSocket.username.toLowerCase() === cleanUser.toLowerCase()) {
+        sSocket.emit('force_disconnect', {
+          message: banMessage,
+          banStatus: banStatus,
+          banExpiresAt: banExpiresAt
+        });
+        setTimeout(() => {
+          try { sSocket.disconnect(true); } catch(e) {}
+        }, 400);
       }
-    }, 500);
+    }
     
-    activeUsers.delete(username);
+    activeUsers.delete(cleanUser);
+    activeUsers.delete(cleanUser.toLowerCase());
 
     for (const [sId, sData] of activeSessions.entries()) {
-      if (sData.username === username) {
+      if (sData.username && sData.username.toLowerCase() === cleanUser.toLowerCase()) {
         activeSessions.delete(sId);
       }
     }
     
     if (typeof broadcastUserList === 'function') broadcastUserList();
     
-    res.json({ success: true, message: `Akun ${username} berhasil diblokir (${banStatus})!` });
+    res.json({ success: true, message: `Akun ${cleanUser} berhasil diblokir (${banStatus})!` });
   });
 });
 
