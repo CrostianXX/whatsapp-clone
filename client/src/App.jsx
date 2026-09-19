@@ -565,6 +565,7 @@ const GLOBAL_ROOM = {
               }
 
               setChats(prev => {
+                let hasRealChanges = false;
                 const updated = { ...prev };
                 for (const peer in decryptedPrivateMsgs) {
                   const existingPeerChats = updated[peer] || [];
@@ -573,20 +574,28 @@ const GLOBAL_ROOM = {
                   decryptedPrivateMsgs[peer].forEach(m => {
                     const existing = map.get(m.id);
                     if (existing) {
-                      map.set(m.id, {
-                        ...existing,
-                        ...m,
-                        text: (existing.text && existing.text !== '[Sent Message]' && existing.text !== '[Encrypted Message]') ? existing.text : (m.text || existing.text),
-                        blob: existing.blob || m.blob,
-                        mediaUrl: existing.mediaUrl || m.mediaUrl,
-                        status: (existing.status === 'read') ? 'read' : ((m.status === 'read' || m.status === 'delivered') ? m.status : (existing.status || m.status))
-                      });
+                      const newStatus = (existing.status === 'read') ? 'read' : ((m.status === 'read' || m.status === 'delivered') ? m.status : (existing.status || m.status));
+                      const newText = (existing.text && existing.text !== '[Sent Message]' && existing.text !== '[Encrypted Message]') ? existing.text : (m.text || existing.text);
+                      if (existing.status !== newStatus || existing.text !== newText) {
+                        hasRealChanges = true;
+                        map.set(m.id, {
+                          ...existing,
+                          ...m,
+                          text: newText,
+                          blob: existing.blob || m.blob,
+                          mediaUrl: existing.mediaUrl || m.mediaUrl,
+                          status: newStatus
+                        });
+                      }
                     } else {
+                      hasRealChanges = true;
                       map.set(m.id, m);
                     }
                   });
-                  const sorted = Array.from(map.values()).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-                  updated[peer] = sorted;
+                  if (hasRealChanges) {
+                    const sorted = Array.from(map.values()).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                    updated[peer] = sorted;
+                  }
                 }
 
                 const activeRoom = selectedUserRef.current ? selectedUserRef.current.username : null;
@@ -609,6 +618,7 @@ const GLOBAL_ROOM = {
                   }
                 }
 
+                if (!hasRealChanges) return prev;
                 return updated;
               });
             }
@@ -778,14 +788,22 @@ const GLOBAL_ROOM = {
       newSocket.on('message_status_update', ({ from, messageId, status }) => {
         setChats(prev => {
            const peer = from;
-           const userChat = [...(prev[peer] || [])];
+           const userChat = prev[peer];
+           if (!userChat || userChat.length === 0) return prev;
+
+           let hasChange = false;
            const updatedChat = userChat.map(msg => {
               if (!messageId || msg.id === messageId) {
-                 if (msg.status === 'read' && status !== 'read') return msg; // never downgrade
-                 return { ...msg, status: status };
+                 if (msg.status !== status) {
+                    if (msg.status === 'read' && status !== 'read') return msg; // never downgrade
+                    hasChange = true;
+                    return { ...msg, status: status };
+                 }
               }
               return msg;
            });
+
+           if (!hasChange) return prev;
            return { ...prev, [peer]: updatedChat };
         });
       });

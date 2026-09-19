@@ -331,11 +331,14 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
   };
 
   const resolveMediaUrl = (msg) => {
-    if (msg.blob) {
-      return URL.createObjectURL(msg.blob);
-    }
     if (msg.mediaUrl && (msg.mediaUrl.startsWith('data:') || msg.mediaUrl.startsWith('http:') || msg.mediaUrl.startsWith('https:') || msg.mediaUrl.startsWith('blob:'))) {
       return msg.mediaUrl;
+    }
+    if (msg.blob) {
+      if (!msg._cachedBlobUrl) {
+        msg._cachedBlobUrl = URL.createObjectURL(msg.blob);
+      }
+      return msg._cachedBlobUrl;
     }
     if (!msg.fileBuffer) return msg.mediaUrl || null;
     if (typeof msg.fileBuffer === 'string') {
@@ -346,10 +349,13 @@ function ChatArea({ messages, currentUser, recipient, onSendMessage, onDeleteMes
       return `data:${mime};base64,${msg.fileBuffer}`;
     }
     if (typeof msg.fileBuffer === 'object' && msg.fileBuffer.type === 'Buffer' && Array.isArray(msg.fileBuffer.data)) {
-      const uint8 = new Uint8Array(msg.fileBuffer.data);
-      const mime = resolveMimeType(msg.fileName, msg.mimeType);
-      const blob = new Blob([uint8], { type: mime });
-      return URL.createObjectURL(blob);
+      if (!msg._cachedBlobUrl) {
+        const uint8 = new Uint8Array(msg.fileBuffer.data);
+        const mime = resolveMimeType(msg.fileName, msg.mimeType);
+        const blob = new Blob([uint8], { type: mime });
+        msg._cachedBlobUrl = URL.createObjectURL(blob);
+      }
+      return msg._cachedBlobUrl;
     }
     return msg.mediaUrl || null;
   };
